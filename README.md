@@ -18,5 +18,6 @@
 
 ## 当前状态
 
-项目处于第一阶段基线准备中。源代码基线需要从上游仓库获取后再开始业务改造。
+已导入 DataSense 上游代码基线，当前版本保留原有 Streamlit 页面、LangChain DataFrame Agent、图表能力和测试辅助脚本。后续改造从电商订单数据接入开始。
 
+上游原始说明保存在 [UPSTREAM_README.md](UPSTREAM_README.md)，便于核对原项目功能和运行方式。
