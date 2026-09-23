@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
@@ -31,7 +31,7 @@ def filter_period(df: pd.DataFrame, start: date | str | pd.Timestamp, end: date 
     """Filter a date range with inclusive start and inclusive end semantics."""
 
     start_ts = pd.Timestamp(start).normalize()
-    end_ts = pd.Timestamp(end).normalize() + pd.Timedelta(days=1)
+    end_ts = pd.Timestamp(end).normalize() + timedelta(days=1)
     if end_ts <= start_ts:
         raise ValueError("Period end must be on or after period start")
 

@@ -2,6 +2,7 @@ import os
 import io
 import json
 import traceback
+from datetime import timedelta
 import pandas as pd
 import streamlit as st
 
@@ -733,8 +734,8 @@ if not validation["missing_required"]:
                 st.dataframe(metric_view, hide_index=True, use_container_width=True)
 
                 period_days = (current_end - current_start).days + 1
-                previous_end = current_start - pd.Timedelta(days=1)
-                previous_start = previous_end - pd.Timedelta(days=period_days - 1)
+                previous_end = current_start - timedelta(days=1)
+                previous_start = previous_end - timedelta(days=period_days - 1)
                 comparison = compare_periods(
                     commerce_analysis_df,
                     current_start,
@@ -784,7 +785,7 @@ tab_agent, tab_eda, tab_nlq, tab_viz, tab_manip = st.tabs(["Commerce Agent", "ED
 
 with tab_agent:
     st.subheader("Commerce Agent")
-    st.caption("Agent 会调用固定的经营分析工具，返回指标、周期对比、商品贡献和订单明细证据。")
+    st.caption("Agent 会调用固定的经营分析工具和指标口径知识库，返回计算结果与规则来源。")
     agent_question = st.text_area(
         "请输入经营分析问题",
         placeholder="例如：比较 2026-09-08 到 2026-09-09 与上一周期的净销售额，并找出变化最大的商品",

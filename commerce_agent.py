@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from commerce_metrics import calculate_metrics, compare_periods, order_drilldown, product_contribution
+from rag_knowledge import default_knowledge_base
 
 
 def serialise_payload(value: Any) -> str:
@@ -24,6 +25,8 @@ def build_commerce_tools(df: pd.DataFrame):
     """Create deterministic LangChain tools bound to the current dataframe."""
 
     from langchain_core.tools import tool
+
+    knowledge_base = default_knowledge_base()
 
     @tool
     def get_period_metrics(start: str, end: str) -> str:
@@ -75,7 +78,13 @@ def build_commerce_tools(df: pd.DataFrame):
         except Exception as exc:
             return serialise_payload({"error": str(exc)})
 
-    return [get_period_metrics, compare_period_metrics, rank_product_contribution, drilldown_orders]
+    @tool
+    def retrieve_metric_rules(query: str) -> str:
+        """检索销售额、冲销、净销售额、订单数和客单价的业务口径，并返回来源。"""
+
+        return serialise_payload(knowledge_base.retrieve(query))
+
+    return [get_period_metrics, compare_period_metrics, rank_product_contribution, drilldown_orders, retrieve_metric_rules]
 
 
 def build_commerce_agent(model, df: pd.DataFrame):
@@ -86,6 +95,8 @@ def build_commerce_agent(model, df: pd.DataFrame):
         "你是电商经营分析 Agent。只能使用提供的业务工具计算数据，不能编造数值。"
         "涉及周期对比时必须先确定当前周期和上一周期；回答中说明指标口径、日期范围和数据限制。"
         "销售额、冲销金额、净销售额必须分别展示；如果问题缺少日期范围，先向用户询问。"
+        "当用户询问指标定义、计算方式、退款/冲销或数据限制时，先调用 retrieve_metric_rules，"
+        "回答中列出检索结果的 source 作为规则依据。"
     )
     try:
         from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -123,4 +134,3 @@ def run_commerce_agent(model, df: pd.DataFrame, question: str) -> str:
     if isinstance(result, dict):
         return str(result.get("output", result))
     return str(result)
-

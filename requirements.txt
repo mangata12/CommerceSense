@@ -57,6 +57,7 @@ langchain-anthropic>=0.1.0,<1.0.0
 # Data Formatting
 # ----------------------------------------------------------------------------
 tabulate>=0.9.0,<1.0.0  # For formatted table output (used by pandas/streamlit)
+scikit-learn>=1.4.0,<2.0.0  # Lightweight local TF-IDF retriever for metric RAG
 
 # ----------------------------------------------------------------------------
 # Note on Optional Dependencies:

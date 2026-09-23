@@ -21,6 +21,6 @@
 
 已导入 DataSense 上游代码基线，当前版本保留原有 Streamlit 页面、LangChain DataFrame Agent、图表能力和测试辅助脚本。后续改造从电商订单数据接入开始。
 
-当前已完成订单字段映射、数据质量摘要、确定性经营指标和 Commerce Agent 工具调用。AI 功能需要在页面中配置对应模型 API Key。
+当前已完成订单字段映射、数据质量摘要、确定性经营指标、Commerce Agent 工具调用和指标口径 RAG。AI 功能需要在页面中配置对应模型 API Key。
 
 上游原始说明保存在 [UPSTREAM_README.md](UPSTREAM_README.md)，便于核对原项目功能和运行方式。
