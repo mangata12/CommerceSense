@@ -25,6 +25,7 @@ from commerce_data import (
     normalise_commerce_data,
     validate_commerce_data,
 )
+from commerce_metrics import calculate_metrics, compare_periods, order_drilldown, product_contribution
 
 # load_dotenv()
 # ----------------------------
@@ -700,6 +701,58 @@ with st.expander("🛒 Commerce data setup", expanded=True):
         st.session_state.commerce_mapping_columns = tuple(st.session_state.df.columns)
         st.success("字段映射已应用，标准字段已加入当前数据表。")
         st.rerun()
+
+if not validation["missing_required"]:
+    commerce_analysis_df = normalise_commerce_data(df, selected_mapping)
+    parsed_times = pd.to_datetime(commerce_analysis_df["order_time"], errors="coerce")
+    valid_times = parsed_times.dropna()
+    if not valid_times.empty:
+        min_date = valid_times.min().date()
+        max_date = valid_times.max().date()
+        with st.expander("📈 Commerce metrics preview", expanded=False):
+            st.caption("金额按数量 × 单价计算；正数为销售，负数为冲销。日期范围包含起止日期。")
+            period = st.date_input(
+                "当前分析周期",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="commerce_current_period",
+            )
+            if isinstance(period, tuple) and len(period) == 2:
+                current_start, current_end = period
+                current_metrics = calculate_metrics(commerce_analysis_df, current_start, current_end)
+                metric_view = pd.DataFrame(
+                    [{"指标": key, "结果": value} for key, value in current_metrics.items() if key not in {"start", "end"}]
+                )
+                st.dataframe(metric_view, hide_index=True, use_container_width=True)
+
+                period_days = (current_end - current_start).days + 1
+                previous_end = current_start - pd.Timedelta(days=1)
+                previous_start = previous_end - pd.Timedelta(days=period_days - 1)
+                comparison = compare_periods(
+                    commerce_analysis_df,
+                    current_start,
+                    current_end,
+                    previous_start,
+                    previous_end,
+                )
+                st.markdown("#### 相邻周期对比")
+                st.dataframe(comparison, hide_index=True, use_container_width=True)
+
+                st.markdown("#### 商品变化贡献")
+                contribution = product_contribution(
+                    commerce_analysis_df,
+                    current_start,
+                    current_end,
+                    previous_start,
+                    previous_end,
+                )
+                st.dataframe(contribution, hide_index=True, use_container_width=True)
+
+                product_filter = st.text_input("订单下钻商品筛选（可选）", key="commerce_product_filter")
+                drilldown = order_drilldown(commerce_analysis_df, current_start, current_end, product_filter or None)
+                st.markdown("#### 订单明细")
+                st.dataframe(drilldown, hide_index=True, use_container_width=True)
 
 # Instantiate model (only if API key is available)
 if not api_key_to_use:
