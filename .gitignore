@@ -13,10 +13,10 @@ data/processed/
 models/
 outputs/
 *.csv
+!data/examples/*.csv
 *.xlsx
 *.xls
 *.parquet
 *.db
 *.sqlite3
 *.log
-

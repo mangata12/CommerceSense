@@ -18,6 +18,13 @@ from langchain.prompts import PromptTemplate
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
 from langchain_core.output_parsers import StrOutputParser
 from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
+from commerce_data import (
+    COMMERCE_FIELDS,
+    infer_field_mapping,
+    load_commerce_file,
+    normalise_commerce_data,
+    validate_commerce_data,
+)
 
 # load_dotenv()
 # ----------------------------
@@ -296,12 +303,7 @@ def get_chat_model(provider: str, model_name: str):
 # Helpers: Data loading
 # ----------------------------
 def load_uploaded_file(uploaded_file) -> pd.DataFrame:
-    filename = uploaded_file.name.lower()
-    if filename.endswith(".csv"):
-        return pd.read_csv(uploaded_file)
-    if filename.endswith(".xlsx") or filename.endswith(".xls"):
-        return pd.read_excel(uploaded_file)
-    raise ValueError("Unsupported file format. Please upload CSV or Excel.")
+    return load_commerce_file(uploaded_file)
 
 
 # ----------------------------
@@ -644,6 +646,60 @@ df = st.session_state.df
 if df is None:
     st.info("Upload a CSV or Excel file to begin.")
     st.stop()
+
+# Commerce data setup is deterministic and available before an API key is entered.
+if st.session_state.get("commerce_mapping_columns") != tuple(df.columns):
+    st.session_state.commerce_mapping = infer_field_mapping(list(df.columns))
+    st.session_state.commerce_mapping_columns = tuple(df.columns)
+
+with st.expander("🛒 Commerce data setup", expanded=True):
+    st.caption("Map your order columns once. The canonical fields will be used by the business-analysis tools in the next stage.")
+    available_columns = ["(未映射)"] + [str(column) for column in df.columns]
+    selected_mapping = {}
+    mapping = st.session_state.get("commerce_mapping", {})
+    mapping_columns = st.columns(2)
+    for index, (field, label, required) in enumerate(COMMERCE_FIELDS):
+        current = mapping.get(field)
+        default_index = available_columns.index(current) if current in available_columns else 0
+        with mapping_columns[index % 2]:
+            selected = st.selectbox(
+                f"{label}{' *' if required else ''}",
+                available_columns,
+                index=default_index,
+                key=f"commerce_mapping_{field}",
+            )
+        if selected != "(未映射)":
+            selected_mapping[field] = selected
+
+    validation = validate_commerce_data(df, selected_mapping)
+    metric_columns = st.columns(5)
+    metric_columns[0].metric("数据行数", f"{validation['rows']:,}")
+    metric_columns[1].metric("已映射字段", f"{len(validation['mapped_fields'])}/{len(COMMERCE_FIELDS)}")
+    metric_columns[2].metric("重复行", f"{validation['duplicate_rows']:,}")
+    metric_columns[3].metric("无效时间", f"{validation['invalid_order_time']:,}")
+    metric_columns[4].metric("负数量", f"{validation['negative_quantity']:,}")
+
+    mapped_view = pd.DataFrame(
+        [
+            {"标准字段": field, "业务含义": label, "当前列": selected_mapping.get(field, "未映射"), "必填": "是" if required else "否"}
+            for field, label, required in COMMERCE_FIELDS
+        ]
+    )
+    st.dataframe(mapped_view, hide_index=True, use_container_width=True)
+
+    if validation["missing_required"]:
+        st.warning("缺少必填字段：" + ", ".join(validation["missing_required"]) + "。完成映射后再进行经营指标分析。")
+    if validation["invalid_order_time"] or validation["invalid_quantity"] or validation["invalid_unit_price"]:
+        st.warning(
+            f"数据质量提示：无效时间 {validation['invalid_order_time']} 行，"
+            f"无效数量 {validation['invalid_quantity']} 行，无效单价 {validation['invalid_unit_price']} 行。"
+        )
+    if st.button("应用电商字段映射", type="primary"):
+        st.session_state.commerce_mapping = selected_mapping
+        st.session_state.df = normalise_commerce_data(df, selected_mapping)
+        st.session_state.commerce_mapping_columns = tuple(st.session_state.df.columns)
+        st.success("字段映射已应用，标准字段已加入当前数据表。")
+        st.rerun()
 
 # Instantiate model (only if API key is available)
 if not api_key_to_use:
