@@ -41,6 +41,7 @@ langchain-experimental>=0.0.50,<1.0.0  # Experimental features (pandas dataframe
 # ----------------------------------------------------------------------------
 # OpenAI GPT models (GPT-4, GPT-3.5, etc.)
 langchain-openai>=0.0.5,<1.0.0
+# DeepSeek uses the OpenAI-compatible ChatOpenAI endpoint; no extra SDK is required.
 
 # Google Gemini models
 langchain-google-genai>=2.0.10,<3.0.0

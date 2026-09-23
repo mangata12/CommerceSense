@@ -26,6 +26,7 @@ from commerce_data import (
     validate_commerce_data,
 )
 from commerce_metrics import calculate_metrics, compare_periods, order_drilldown, product_contribution
+from commerce_agent import run_commerce_agent
 
 # load_dotenv()
 # ----------------------------
@@ -291,6 +292,8 @@ def is_code_safe(code: str) -> tuple[bool, str | None]:
 # Helpers: Model selection
 # ----------------------------
 def get_chat_model(provider: str, model_name: str):
+    if provider == "DeepSeek":
+        return ChatOpenAI(model=model_name, base_url="https://api.deepseek.com", api_key=os.environ.get("DEEPSEEK_API_KEY"), temperature=0)
     if provider == "Google Gemini":
         return ChatGoogleGenerativeAI(model=model_name)
     if provider == "OpenAI":
@@ -606,10 +609,13 @@ with st.sidebar:
     st.header("Settings")
     provider = st.selectbox(
         "Model Provider",
-        ["Google Gemini", "OpenAI", "Anthropic Claude"],
+        ["DeepSeek", "Google Gemini", "OpenAI", "Anthropic Claude"],
         index=0,
     )
-    if provider == "Google Gemini":
+    if provider == "DeepSeek":
+        default_model = "deepseek-chat"
+        key_label = "DEEPSEEK_API_KEY"
+    elif provider == "Google Gemini":
         default_model = "gemini-2.5-flash"
         key_label = "GOOGLE_API_KEY"
     elif provider == "OpenAI":
@@ -774,7 +780,27 @@ viz_prefill = st.session_state.pop("_viz_prefill", None)
 if viz_prefill is not None:
     st.session_state["viz_request"] = viz_prefill
 
-tab_eda, tab_nlq, tab_viz, tab_manip = st.tabs(["EDA", "NLQ", "Visualization", "Dataframe Manipulator"])
+tab_agent, tab_eda, tab_nlq, tab_viz, tab_manip = st.tabs(["Commerce Agent", "EDA", "NLQ", "Visualization", "Dataframe Manipulator"])
+
+with tab_agent:
+    st.subheader("Commerce Agent")
+    st.caption("Agent 会调用固定的经营分析工具，返回指标、周期对比、商品贡献和订单明细证据。")
+    agent_question = st.text_area(
+        "请输入经营分析问题",
+        placeholder="例如：比较 2026-09-08 到 2026-09-09 与上一周期的净销售额，并找出变化最大的商品",
+        height=100,
+        key="commerce_agent_question",
+    )
+    if st.button("运行 Commerce Agent", type="primary") and agent_question.strip():
+        with st.spinner("Agent 正在调用经营分析工具..."):
+            try:
+                agent_answer = run_commerce_agent(chat_model, df, agent_question)
+                st.session_state["commerce_agent_last_answer"] = agent_answer
+            except Exception as exc:
+                st.error(f"Agent 执行失败：{exc}")
+    if st.session_state.get("commerce_agent_last_answer"):
+        st.markdown("### 分析结果")
+        st.write(st.session_state["commerce_agent_last_answer"])
 
 with tab_eda:
     st.markdown("## 🔍 Exploratory Data Analysis")
