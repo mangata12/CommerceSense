@@ -25,6 +25,8 @@
 
 上游原始说明保存在 [UPSTREAM_README.md](UPSTREAM_README.md)，便于核对原项目功能和运行方式。
 
+初次学习项目可阅读 [从零理解 CommerceSense：业务、源码、Agent 与面试](docs/project-walkthrough.md)，包含源码阅读顺序、逐段解释、简历表达边界和动手练习。运行 `.\.venv\Scripts\python.exe scripts/learn_project.py` 可用三条模拟订单走通数据、检索、真实 LangChain 工具执行及报告导出；模型响应预先模拟，无需密钥、不调用真实模型 API，输出保存在 `outputs/learning_demo/`。
+
 ## 本地运行
 
 在项目目录中使用 Python 3.12 虚拟环境：
