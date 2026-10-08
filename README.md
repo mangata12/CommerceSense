@@ -19,9 +19,9 @@
 
 ## 当前状态
 
-当前已完成订单字段映射、数据质量摘要、确定性经营指标、Commerce Agent 工具调用、版本化规则 RAG 和经营周报。可用性优化阶段 A、B、C 已完成：中文界面支持连续问答、完整经营诊断、固定图表及 Markdown/CSV/ZIP 导出。
+当前已完成订单字段映射、数据质量摘要、确定性经营指标、Commerce Agent 工具调用、版本化规则 RAG 和经营周报。阶段 A/B/C 的功能及阶段 D 的本地自动验收、直接依赖固定和使用文档已完成；50 项测试通过。真实 DeepSeek API 和浏览器实际渲染尚未验收，详见 [阶段 D 记录](docs/stage-d-validation.md)。
 
-无 API Key 可以导入数据、加载模拟样例、查看完整经营概览并生成基础周报。模型仅用于分析助手、高级工具或可选 AI 解读，调用时再检查配置；支持当前会话密钥或启动环境变量，不由页面写入进程环境变量。完整环境及部署验收留待阶段 D。
+无 API Key 可以导入数据、加载模拟样例、查看完整经营概览并生成基础周报。模型仅用于分析助手、高级工具或可选 AI 解读，调用时再检查配置；支持当前会话密钥或启动环境变量，不由页面写入进程环境变量。云端部署仍未验收。
 
 上游原始说明保存在 [UPSTREAM_README.md](UPSTREAM_README.md)，便于核对原项目功能和运行方式。
 
@@ -32,18 +32,20 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m streamlit run app.py
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501 --browser.gatherUsageStats false
 ```
 
-依赖版本固定与完整部署验收安排在阶段 D；实测环境及验证范围见 [阶段 A 验收](docs/stage-a-validation.md)、[阶段 B 验收](docs/stage-b-validation.md) 和 [阶段 C 验收](docs/stage-c-validation.md)。
+打开 `http://127.0.0.1:8501`，终端按 Ctrl+C 停止。`requirements.txt` 固定当前 Windows / CPython 3.12.14 验证过的直接依赖，不是所有传递依赖或跨平台的完整锁文件。详细启动、四个入口、导入格式与故障排查见 [本地使用指南](docs/local-use.md)。
+
+实测范围见 [阶段 A](docs/stage-a-validation.md)、[阶段 B](docs/stage-b-validation.md)、[阶段 C](docs/stage-c-validation.md)、[阶段 D](docs/stage-d-validation.md)。
 
 ## 导入与字段映射
 
-1. 上传 CSV 或 Excel（读取第一张工作表）。CSV 支持 UTF-8/UTF-8 BOM 和 GB18030，订单号和商品号按文本读取以保留前导零；Excel 原文件中已作为数字丢失的前导零无法恢复。
+1. 上传 CSV 或 XLSX（读取第一张工作表）；旧版 XLS 请先另存为 XLSX。CSV 支持 UTF-8/UTF-8 BOM 和 GB18030，订单号和商品号按文本读取以保留前导零；Excel 原文件中已作为数字丢失的前导零无法恢复。
 2. 明确选择币种（CNY/GBP/USD/EUR）。项目模拟样例使用 CNY，UCI Online Retail 使用 GBP；系统不进行汇率转换。
 3. 确认订单号、数量、单价、订单时间四个必填字段。商品编号和商品名称至少映射一个才能进行商品贡献分析；客户编号和地区可选。
 4. 查看有效、排除记录及原因，再点击“应用电商字段映射”。更换文件内容或应用新映射会清空旧答案、工具结果和报告；每次映射从原始数据重新生成。
-5. 进入“经营概览”，选择周期查看指标、相邻周期对比、商品贡献和精确商品下钻。整个过程无需 API Key。
+5. 进入“经营概览”，选择当前和对比周期查看指标、商品贡献和精确商品下钻。整个过程无需 API Key。
 
 金额按整数分汇总；负数量保留为冲销，负单价及无法精确到分的金额排除。无效日期、空订单号和非有限数值排除；重复明细保留并提示。订单数包含周期内的冲销订单，客单价为“净销售额／周期去重订单数”。详情见 [指标口径](knowledge/commerce_metrics.md)。
 
@@ -68,7 +70,7 @@ python -m venv .venv
 
 页面展示回答、实际工具名称、填充默认条件后的有效输入参数、结构化结果及真实检索来源，不展示模型内部推理。调用失败时保留问题和已完成结果，可“重试上个问题”；“清空对话”不清空当前数据和页面日期。更换数据或应用映射会清理旧对话及条件。
 
-主模型请求超时为 45 秒，最多重试 1 次；Agent 最多 6 轮工具调用，循环在轮次边界检查 120 秒运行限制。120 秒并非正在进行的网络请求的硬中断，单次响应可能包含多个工具调用。真实 API 的可用性、回答质量和服务端重试行为尚未验收。
+主模型请求超时为 45 秒，最多重试 1 次；Agent 最多 6 轮工具调用，循环在轮次边界检查 120 秒运行限制。120 秒并非正在进行的网络请求的硬中断，单次响应可能包含多个工具调用。真实 API 的可用性、回答质量和服务端重试行为尚未验收。项目不会自动加载 `.env`；密钥通过侧栏当前会话或启动环境变量配置。
 
 “高级工具”默认关闭，包含上游自然语言查询、自由绘图和数据处理。启用后会执行模型生成的 Python 代码，**不能视为安全沙箱**；仅用于可信的本地环境和可信数据。工具操作数据副本，处理结果下载后重新上传才能用于经营分析。
 
@@ -96,6 +98,12 @@ charts/product_change.png
 
 Manifest 记录周期、币种、质量计数、完整商品数、变化对账及规则元数据。报告说明空周期、零基期、缺少客户／商品字段和其他限制。日期、数据或映射变化后，旧报告不会继续作为当前结果提供下载。
 
+公开模拟样例的 [报告核对示例](docs/report-example.md) 包含完整商品变化和对应订单，可用下列命令生成本地报告包；输出在被 Git 忽略的 `outputs/demo_report/`：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/export_demo_report.py
+```
+
 ## 版本化规则与检索
 
 指标口径文件按 13 条独立规则拆分，每条包含规则编号、指标标识、标题和版本。检索返回实际命中的原文、来源行号及分数；未达到 TF-IDF 相关性阈值时明确返回“未找到规则”。报告按固定代码绑定规则解释，不通过文档运行或修改公式。
@@ -114,4 +122,12 @@ Manifest 记录周期、币种、质量计数、完整商品数、变化对账�
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-包含 CSV/XLSX、映射与会话生命周期、金额和商品聚合、LangChain 工具调用链、连续对话和 Streamlit AppTest 页面交互。模型测试使用确定性模拟传输层，LangChain 编排、工具、指标和检索均实际执行；AppTest 不启动常驻服务、不调用真实模型 API。真实 DeepSeek API 验收留待阶段 D 单独报告。
+包含 CSV/XLSX、映射与会话生命周期、金额和商品聚合、LangChain 工具调用链、连续对话和 Streamlit AppTest 页面交互。模型测试使用确定性模拟传输层，LangChain 编排、工具、指标和检索均实际执行；AppTest 不启动常驻服务、不调用真实模型 API。
+
+真实 DeepSeek 验收脚本仅使用仓库公开模拟数据，可能产生 API 费用；未设置 `DEEPSEEK_API_KEY` 时打印 `status=skipped`，不能算验收成功：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/verify_deepseek.py
+```
+
+本次未配置密钥，真实 API 验收待完成。临时服务健康检查和首页 HTTP 响应通过，服务已停止；浏览器自动化工具初始化失败，实际浏览器渲染未验收。

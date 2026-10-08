@@ -83,7 +83,7 @@ def render_quality(raw, preview):
 def render_import():
     st.subheader("数据导入")
     st.write("上传订单明细，确认币种和字段映射后即可查看经营概览。")
-    st.file_uploader("上传 CSV 或 Excel", type=["csv", "xlsx", "xls"], key="commerce_upload", on_change=handle_upload)
+    st.file_uploader("上传 CSV 或 XLSX", type=["csv", "xlsx"], key="commerce_upload", on_change=handle_upload)
     if st.button("加载模拟样例（CNY）", key="load_commerce_sample"):
         file = io.BytesIO((Path(__file__).parent / "data/examples/commerce_orders_demo.csv").read_bytes())
         file.name = "commerce_orders_demo.csv"

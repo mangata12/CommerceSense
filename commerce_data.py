@@ -63,10 +63,10 @@ def load_commerce_file(uploaded_file: BinaryIO) -> pd.DataFrame:
         except UnicodeDecodeError:
             uploaded_file.seek(0)
             return pd.read_csv(uploaded_file, encoding="gb18030", dtype=str, keep_default_na=False)
-    if filename.endswith((".xlsx", ".xls")):
+    if filename.endswith(".xlsx"):
         uploaded_file.seek(0)
         return pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
-    raise ValueError("Unsupported file format. Please upload CSV or Excel.")
+    raise ValueError("仅支持 CSV 或 XLSX；旧版 XLS 请先另存为 XLSX。")
 
 
 def normalise_commerce_data(df: pd.DataFrame, mapping: Mapping[str, str]) -> pd.DataFrame:

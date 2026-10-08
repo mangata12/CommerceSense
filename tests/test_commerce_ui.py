@@ -31,6 +31,8 @@ class CommerceUITests(unittest.TestCase):
         self.assertTrue(any(metric.label == "净销售额" for metric in app.metric))
         self.assertEqual(app.selectbox(key="commerce_currency_choice").value, "CNY")
         self.assertFalse(app.toggle(key="commerce_advanced_enabled").value)
+        self.assertTrue(app.date_input(key="commerce_current_period").proto.is_range)
+        self.assertTrue(app.date_input(key="commerce_previous_period").proto.is_range)
         self.assertFalse(any(area.key == "commerce_advanced_request" for area in app.text_area))
         self.assertTrue(any(button.key == "generate_commerce_report" for button in app.button))
         self.assertTrue(any(expander.label == "数据质量详情" for expander in app.expander))
