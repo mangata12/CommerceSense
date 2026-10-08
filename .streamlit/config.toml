@@ -1,0 +1,8 @@
+# Local development: detect imported-module edits reliably on Windows.
+[server]
+fileWatcherType = "poll"
+runOnSave = true
+folderWatchBlacklist = [".venv", "outputs", "data/raw", "data/private", "data/processed"]
+
+[browser]
+gatherUsageStats = false

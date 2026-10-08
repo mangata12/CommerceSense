@@ -19,7 +19,7 @@
 
 ## 当前状态
 
-当前已完成订单字段映射、数据质量摘要、确定性经营指标、Commerce Agent 工具调用、版本化规则 RAG 和经营周报。阶段 A/B/C 的功能及阶段 D 的本地自动验收、直接依赖固定和使用文档已完成；50 项测试通过。真实 DeepSeek API 和浏览器实际渲染尚未验收，详见 [阶段 D 记录](docs/stage-d-validation.md)。
+当前已完成订单字段映射、数据质量摘要、确定性经营指标、Commerce Agent 工具调用、版本化规则 RAG 和经营周报。阶段 A/B/C 的功能及阶段 D 的本地自动验收、直接依赖固定和使用文档已完成；含交互修复共 57 项测试通过。真实 DeepSeek API 和浏览器实际渲染尚未验收，详见 [阶段 D 记录](docs/stage-d-validation.md) 和 [交互修复记录](docs/interaction-fix-validation.md)。
 
 无 API Key 可以导入数据、加载模拟样例、查看完整经营概览并生成基础周报。模型仅用于分析助手、高级工具或可选 AI 解读，调用时再检查配置；支持当前会话密钥或启动环境变量，不由页面写入进程环境变量。云端部署仍未验收。
 
@@ -36,6 +36,8 @@ python -m venv .venv
 ```
 
 打开 `http://127.0.0.1:8501`，终端按 Ctrl+C 停止。`requirements.txt` 固定当前 Windows / CPython 3.12.14 验证过的直接依赖，不是所有传递依赖或跨平台的完整锁文件。详细启动、四个入口、导入格式与故障排查见 [本地使用指南](docs/local-use.md)。
+
+项目的 `.streamlit/config.toml` 为本地开发开启轮询检测和保存后重跑，排除虚拟环境及数据、输出目录。已有旧服务需要重启一次才能读取该配置；仅刷新浏览器不保证清除后台导入模块。上线时可覆盖 `--server.runOnSave false`。更新后应核对实际服务的高级工具输入表单和局部刷新行为，不能只凭健康检查判断代码已更新。
 
 实测范围见 [阶段 A](docs/stage-a-validation.md)、[阶段 B](docs/stage-b-validation.md)、[阶段 C](docs/stage-c-validation.md)、[阶段 D](docs/stage-d-validation.md)。
 
