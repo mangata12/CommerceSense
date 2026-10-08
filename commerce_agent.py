@@ -14,11 +14,14 @@ from rag_knowledge import default_knowledge_base
 def serialise_payload(value: Any) -> str:
     """Return stable JSON for tool results, including pandas scalar values."""
 
-    if isinstance(value, pd.DataFrame):
-        value = value.to_dict(orient="records")
-    elif isinstance(value, pd.Series):
-        value = value.to_dict()
-    return json.dumps(value, ensure_ascii=False, default=str, indent=2)
+    def convert(item):
+        if isinstance(item, pd.DataFrame):
+            return item.to_dict(orient="records")
+        if isinstance(item, pd.Series):
+            return item.to_dict()
+        return str(item)
+
+    return json.dumps(value, ensure_ascii=False, default=convert, indent=2)
 
 
 def build_commerce_tools(df: pd.DataFrame):
@@ -70,11 +73,11 @@ def build_commerce_tools(df: pd.DataFrame):
 
     @tool
     def drilldown_orders(start: str, end: str, product: str = "") -> str:
-        """查询指定日期范围的订单证据，可选按商品名称或编号筛选。日期格式使用 YYYY-MM-DD。"""
+        """查询日期范围的订单证据；product 优先使用贡献表 product_key 精确筛选，同名多编号须使用该标识。日期格式 YYYY-MM-DD。"""
 
         try:
-            result = order_drilldown(df, start, end, product or None).head(100)
-            return serialise_payload({"row_count": len(result), "rows": result})
+            result = order_drilldown(df, start, end, product or None)
+            return serialise_payload({"row_count": len(result), "returned_rows": min(len(result), 100), "rows": result.head(100), "currency": df.attrs.get("currency", "未指定")})
         except Exception as exc:
             return serialise_payload({"error": str(exc)})
 

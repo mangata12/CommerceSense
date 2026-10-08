@@ -21,13 +21,12 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
 from commerce_data import (
     COMMERCE_FIELDS,
-    infer_field_mapping,
     load_commerce_file,
-    normalise_commerce_data,
-    validate_commerce_data,
+    prepare_commerce_data,
 )
 from commerce_metrics import calculate_metrics, compare_periods, order_drilldown, product_contribution
 from commerce_agent import run_commerce_agent
+from commerce_session import load_dataset, apply_dataset_mapping
 
 # load_dotenv()
 # ----------------------------
@@ -455,7 +454,7 @@ When answering, provide specific numbers and results from the data, not approxim
         # Create the dataframe agent with safety instructions (mirrors NLQ.ipynb)
         agent = create_pandas_dataframe_agent(
             model,
-            df,
+            df.copy(deep=True),
             verbose=False,  # Set to True if you want to see tool invocations
             allow_dangerous_code=True,  # Required for pandas agent
             agent_type="openai-tools",  # Ensures reasoning with tool use
@@ -536,7 +535,7 @@ Output only raw code, no markdown.
     safe_globals = {"__builtins__": safe_builtins}
     # Provide a default fig/ax for code that references ax without creating it
     default_fig, default_ax = plt.subplots(figsize=(8, 5))
-    safe_locals = {"df": df, "pd": pd, "plt": plt, "sns": sns, "fig": default_fig, "ax": default_ax}
+    safe_locals = {"df": df.copy(deep=True), "pd": pd, "plt": plt, "sns": sns, "fig": default_fig, "ax": default_ax}
     # Ensure a fresh figure context per run
     plt.close("all")
     try:
@@ -585,7 +584,7 @@ Output only raw code — no markdown, no explanation.
     chain = data_manipulation_prompt | model | StrOutputParser()
     code = chain.invoke({"dataframe_details": dataframe_details, "user_query": user_request})
 
-    safe_locals = {"df": df, "pd": pd}
+    safe_locals = {"df": df.copy(deep=True), "pd": pd}
     try:
         exec(code, {"__builtins__": {}}, safe_locals)
         new_df = safe_locals["df"]
@@ -639,30 +638,26 @@ with st.sidebar:
     st.divider()
     uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx", "xls"])
 
-# Store DF in session
-if "df" not in st.session_state:
-    st.session_state.df = None
-
 if uploaded:
     try:
-        st.session_state.df = load_uploaded_file(uploaded)
+        load_dataset(st.session_state, uploaded)
     except Exception as e:
         st.error(f"Failed to read file: {e}")
+        st.stop()
 
-df = st.session_state.df
+raw_df = st.session_state.get("commerce_raw_df")
 
-if df is None:
+if raw_df is None:
     st.info("Upload a CSV or Excel file to begin.")
     st.stop()
 
-# Commerce data setup is deterministic and available before an API key is entered.
-if st.session_state.get("commerce_mapping_columns") != tuple(df.columns):
-    st.session_state.commerce_mapping = infer_field_mapping(list(df.columns))
-    st.session_state.commerce_mapping_columns = tuple(df.columns)
-
 with st.expander("🛒 Commerce data setup", expanded=True):
-    st.caption("Map your order columns once. The canonical fields will be used by the business-analysis tools in the next stage.")
-    available_columns = ["(未映射)"] + [str(column) for column in df.columns]
+    st.caption("先选择币种并确认字段。应用后，指标、分析助手和图表统一使用有效记录；原始数据单独保留。")
+    currency = st.selectbox("数据币种", ["请选择币种", "CNY", "GBP", "USD", "EUR"], key="commerce_currency_choice")
+    st.caption("项目示例为模拟 CNY 数据；UCI Online Retail 请选 GBP。此选项标注币种，不进行汇率转换。")
+    if uploaded and uploaded.name.lower().endswith((".xlsx", ".xls")):
+        st.info("Excel 只读取第一张工作表；原文件中已作为数字丢失的编号前导零无法恢复。带时区的时间请先转换为统一的本地时间。")
+    available_columns = ["(未映射)"] + [str(column) for column in raw_df.columns]
     selected_mapping = {}
     mapping = st.session_state.get("commerce_mapping", {})
     mapping_columns = st.columns(2)
@@ -679,7 +674,8 @@ with st.expander("🛒 Commerce data setup", expanded=True):
         if selected != "(未映射)":
             selected_mapping[field] = selected
 
-    validation = validate_commerce_data(df, selected_mapping)
+    preview = prepare_commerce_data(raw_df, selected_mapping, currency if currency != "请选择币种" else "CNY")
+    validation = preview["quality"]
     metric_columns = st.columns(5)
     metric_columns[0].metric("数据行数", f"{validation['rows']:,}")
     metric_columns[1].metric("已映射字段", f"{len(validation['mapped_fields'])}/{len(COMMERCE_FIELDS)}")
@@ -694,6 +690,20 @@ with st.expander("🛒 Commerce data setup", expanded=True):
         ]
     )
     st.dataframe(mapped_view, hide_index=True, use_container_width=True)
+    st.dataframe(raw_df.head(20), hide_index=True, use_container_width=True)
+    st.write(f"有效记录：{validation['valid_rows']}，排除记录：{validation['excluded_rows']}。重复明细仅提示，保留参与计算。")
+    reason_labels = {
+        "empty_order_id": "空订单号", "invalid_order_time": "无效日期或不支持的时区",
+        "invalid_quantity": "无效或非有限数量", "invalid_unit_price": "无效或非有限单价",
+        "negative_unit_price": "负单价", "price_precision": "单价超过两位小数",
+        "amount_precision": "明细金额不足最小货币单位",
+    }
+    st.dataframe(pd.DataFrame([{"排除原因": reason_labels[key], "记录数": value} for key, value in validation["exclusion_counts"].items()]), hide_index=True)
+    if not preview["excluded"].empty:
+        with st.expander("查看被排除的原始记录"):
+            st.dataframe(preview["excluded"].head(100), hide_index=True)
+    if validation["missing_product"]:
+        st.warning("请至少映射商品编号或商品名称；未提供时可查看总指标，但无法进行商品贡献分析。")
 
     if validation["missing_required"]:
         st.warning("缺少必填字段：" + ", ".join(validation["missing_required"]) + "。完成映射后再进行经营指标分析。")
@@ -702,22 +712,27 @@ with st.expander("🛒 Commerce data setup", expanded=True):
             f"数据质量提示：无效时间 {validation['invalid_order_time']} 行，"
             f"无效数量 {validation['invalid_quantity']} 行，无效单价 {validation['invalid_unit_price']} 行。"
         )
-    if st.button("应用电商字段映射", type="primary"):
-        st.session_state.commerce_mapping = selected_mapping
-        st.session_state.df = normalise_commerce_data(df, selected_mapping)
-        st.session_state.commerce_mapping_columns = tuple(st.session_state.df.columns)
-        st.success("字段映射已应用，标准字段已加入当前数据表。")
+    if st.button("应用电商字段映射", type="primary", disabled=bool(validation["missing_required"]) or currency == "请选择币种"):
+        apply_dataset_mapping(st.session_state, selected_mapping, currency)
         st.rerun()
 
+df = st.session_state.get("commerce_standard_df")
+if df is None or selected_mapping != st.session_state.get("commerce_applied_mapping") or currency != st.session_state.get("commerce_currency"):
+    st.info("请先应用当前字段映射及币种，再查看指标或运行分析。")
+    st.stop()
+if df.empty:
+    st.warning("没有可分析的有效记录，请检查数据或调整映射。")
+    st.stop()
+
 if not validation["missing_required"]:
-    commerce_analysis_df = normalise_commerce_data(df, selected_mapping)
+    commerce_analysis_df = df
     parsed_times = pd.to_datetime(commerce_analysis_df["order_time"], errors="coerce")
     valid_times = parsed_times.dropna()
     if not valid_times.empty:
         min_date = valid_times.min().date()
         max_date = valid_times.max().date()
         with st.expander("📈 Commerce metrics preview", expanded=False):
-            st.caption("金额按数量 × 单价计算；正数为销售，负数为冲销。日期范围包含起止日期。")
+            st.caption(f"币种：{currency}。金额以整数最小货币单位汇总；负数量为冲销。订单数包含冲销订单；客单价=净销售额／周期去重订单数。日期包含起止日全天。")
             period = st.date_input(
                 "当前分析周期",
                 value=(min_date, max_date),
@@ -729,7 +744,9 @@ if not validation["missing_required"]:
                 current_start, current_end = period
                 current_metrics = calculate_metrics(commerce_analysis_df, current_start, current_end)
                 metric_view = pd.DataFrame(
-                    [{"指标": key, "结果": value} for key, value in current_metrics.items() if key not in {"start", "end"}]
+                    [{"指标": "客单价（净销售额／周期去重订单数）" if key == "average_order_value" else key,
+                      "结果": str(value) if value is not None else "无法统计（未提供客户字段）" if key == "customer_count" else "不适用"}
+                     for key, value in current_metrics.items() if key not in {"start", "end", "currency"} and not key.endswith("_minor")]
                 )
                 st.dataframe(metric_view, hide_index=True, use_container_width=True)
 
@@ -747,16 +764,14 @@ if not validation["missing_required"]:
                 st.dataframe(comparison, hide_index=True, use_container_width=True)
 
                 st.markdown("#### 商品变化贡献")
-                contribution = product_contribution(
-                    commerce_analysis_df,
-                    current_start,
-                    current_end,
-                    previous_start,
-                    previous_end,
-                )
-                st.dataframe(contribution, hide_index=True, use_container_width=True)
-
-                product_filter = st.text_input("订单下钻商品筛选（可选）", key="commerce_product_filter")
+                if not validation["missing_product"]:
+                    contribution = product_contribution(commerce_analysis_df, current_start, current_end, previous_start, previous_end)
+                    st.dataframe(contribution, hide_index=True, use_container_width=True)
+                product_keys = {}
+                if not validation["missing_product"]:
+                    all_products = product_contribution(df, min_date, max_date, min_date, max_date, top_n=None)
+                    product_keys = dict(zip(all_products["product_key"], all_products["product"]))
+                product_filter = st.selectbox("订单下钻商品筛选（精确标识）", [""] + list(product_keys), format_func=lambda key: "全部商品" if not key else f"{product_keys[key]} ({key})", key="commerce_product_filter")
                 drilldown = order_drilldown(commerce_analysis_df, current_start, current_end, product_filter or None)
                 st.markdown("#### 订单明细")
                 st.dataframe(drilldown, hide_index=True, use_container_width=True)
@@ -1104,8 +1119,9 @@ with tab_manip:
             st.error(f"Execution error: {err}")
         else:
             st.success("Manipulation executed. Preview below and download updated CSV.")
-            st.session_state.df = new_df
-            df = new_df
+            st.info("此处为独立数据处理预览，不替换已校验的经营数据；如需分析处理后的文件，请下载后重新上传。")
+            st.dataframe(new_df.head(200))
+            st.download_button("下载处理结果", data=new_df.to_csv(index=False).encode("utf-8-sig"), file_name="manipulated.csv", mime="text/csv")
     # Always show the latest dataframe preview and download option
     st.dataframe(df.head(200))
     csv_bytes = df.to_csv(index=False).encode("utf-8")
