@@ -18,6 +18,7 @@ class CommerceConversationTests(unittest.TestCase):
                                    "002,02,杯子,1,0.20,2026-09-02\n"
                                    "003,01,杯子,-1,0.10,2026-09-02\n"))
         self.data = apply_dataset_mapping(state, state["commerce_mapping"], "CNY")["data"]
+        self.quality = state["commerce_quality"]
         self.period = ("2026-09-01", "2026-09-02")
 
     def test_three_turns_preserve_history_product_and_update_explicit_date(self):
@@ -115,6 +116,18 @@ class CommerceConversationTests(unittest.TestCase):
         self.assertTrue(all(source["source"] == "knowledge/commerce_metrics.md" for source in result["rule_sources"]))
         self.assertIn("净销售额", result["tool_calls"][0]["result"]["context"])
         self.assertEqual(len(model.calls), 1)
+
+    def test_unified_diagnosis_tool_uses_shared_comparison_and_bound_sources(self):
+        model = ScriptedChatModel(responses=[tool_call("diagnose_business", {}), AIMessage(content="经营诊断已完成。")])
+        result = run_commerce_agent(model, self.data, "生成经营诊断", period=("2026-09-02", "2026-09-02"),
+                                    comparison_period=("2026-09-01", "2026-09-01"), quality=self.quality)
+        self.assertIsNone(result["error"])
+        payload = result["tool_calls"][0]["result"]
+        self.assertEqual(payload["current"]["net_sales_minor"], 10)
+        self.assertEqual(payload["previous"]["net_sales_minor"], 30)
+        self.assertEqual(payload["delta_minor"], -20)
+        self.assertEqual(len(result["rule_sources"]), 13)
+        self.assertEqual(result["context"]["previous_start"], "2026-09-01")
 
 
 if __name__ == "__main__":

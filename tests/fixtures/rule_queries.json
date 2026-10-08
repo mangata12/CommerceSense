@@ -1,0 +1,30 @@
+{
+  "calibration": [
+    {"query": "净销售额怎么算，冲销金额怎么处理", "rule_id": "CS-005"},
+    {"query": "成交销售额计算口径", "rule_id": "CS-003"},
+    {"query": "退款冲销金额的计算方法", "rule_id": "CS-004"},
+    {"query": "订单数按明细行数还是订单号去重", "rule_id": "CS-006"},
+    {"query": "没有客户编号怎么统计客户数", "rule_id": "CS-007"},
+    {"query": "客单价的分母包含冲销订单吗", "rule_id": "CS-009"},
+    {"query": "商品变化贡献怎么计算，同名不同编号怎么办", "rule_id": "CS-010"},
+    {"query": "报告订单证据会截断吗", "rule_id": "CS-011"},
+    {"query": "数据质量中无效日期和重复明细怎么处理", "rule_id": "CS-002"},
+    {"query": "CNY GBP 币种和金额精度", "rule_id": "CS-013"},
+    {"query": "订单系统登录失败怎么办", "rule_id": null},
+    {"query": "商品图片如何去除水印", "rule_id": null},
+    {"query": "销售经理招聘流程和面试技巧", "rule_id": null},
+    {"query": "如何计算广告点击率", "rule_id": null},
+    {"query": "杭州明天会下雨吗", "rule_id": null},
+    {"query": "客户浏览器无法打开网页", "rule_id": null}
+  ],
+  "validation": [
+    {"query": "净销售额等于成交销售额减去冲销金额吗", "rule_id": "CS-005"},
+    {"query": "客单价为什么使用周期去重订单数", "rule_id": "CS-009"},
+    {"query": "商品贡献比例能超过100%吗", "rule_id": "CS-010"},
+    {"query": "订单时间的结束日包含全天吗", "rule_id": "CS-001"},
+    {"query": "订单服务器磁盘空间不足怎么处理", "rule_id": null},
+    {"query": "商品标题字体如何修改", "rule_id": null},
+    {"query": "销售团队团建活动怎么安排", "rule_id": null},
+    {"query": "怎么创建GitHub仓库", "rule_id": null}
+  ]
+}

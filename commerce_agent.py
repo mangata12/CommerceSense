@@ -31,7 +31,7 @@ def effective_tool_input(name, params, context):
     if name in {"get_period_metrics", "drilldown_orders"}:
         for target, source in (("start", "current_start"), ("end", "current_end")):
             params[target] = context[source] if context.get("question_has_explicit_period") else params.get(target) or context.get(source, "")
-    elif name in {"compare_period_metrics", "rank_product_contribution"}:
+    elif name in {"compare_period_metrics", "rank_product_contribution", "diagnose_business"}:
         for field in ("current_start", "current_end", "previous_start", "previous_end"):
             force = context.get("question_has_explicit_period") if field.startswith("current_") else context.get("question_has_explicit_comparison")
             params[field] = context[field] if force else params.get(field) or context.get(field, "")
@@ -47,7 +47,7 @@ def effective_tool_input(name, params, context):
     return params
 
 
-def build_commerce_tools(df: pd.DataFrame, context=None):
+def build_commerce_tools(df: pd.DataFrame, context=None, quality=None):
     """Create deterministic LangChain tools bound to the current dataframe."""
 
     from langchain_core.tools import tool
@@ -117,7 +117,20 @@ def build_commerce_tools(df: pd.DataFrame, context=None):
 
         return serialise_payload(knowledge_base.retrieve(query))
 
-    return [get_period_metrics, compare_period_metrics, rank_product_contribution, drilldown_orders, retrieve_metric_rules]
+    @tool
+    def diagnose_business(current_start: str = "", current_end: str = "", previous_start: str = "", previous_end: str = "") -> str:
+        """一次完成经营诊断：指标对比、全部商品变化计算后的排名、重点商品订单证据、绑定规则原文与限制；省略日期沿用当前条件。"""
+        from commerce_diagnosis import run_diagnosis
+        try:
+            params = effective_tool_input("diagnose_business", dict(current_start=current_start, current_end=current_end,
+                                          previous_start=previous_start, previous_end=previous_end), context)
+            result = run_diagnosis(df, (params["current_start"], params["current_end"]),
+                                   (params["previous_start"], params["previous_end"]), quality, knowledge_base=knowledge_base)
+            return serialise_payload(result.tool_payload())
+        except Exception as exc:
+            return serialise_payload({"error": str(exc)})
+
+    return [get_period_metrics, compare_period_metrics, rank_product_contribution, drilldown_orders, retrieve_metric_rules, diagnose_business]
 
 
 class ToolExecutionRecorder(BaseCallbackHandler):
@@ -166,13 +179,13 @@ class ToolExecutionRecorder(BaseCallbackHandler):
             record.update(status="error", result={"error": safe_error(error, self.secrets)})
 
 
-def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6):
+def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6, quality=None):
     """One verified path for installed LangChain 0.3: tool-calling executor."""
     from langchain.agents import AgentExecutor, create_tool_calling_agent
     from langchain_core.messages import SystemMessage
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-    tools = build_commerce_tools(df, context)
+    tools = build_commerce_tools(df, context, quality)
     system_prompt = (
         "你是 CommerceSense 电商经营分析助手，用中文回答。只能通过提供的工具计算，不能编造数值。"
         "下面的分析条件由当前问题、页面周期和上轮对话确定；当前问题明确指定日期或商品时优先使用新条件。"
@@ -182,6 +195,7 @@ def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6
         "不得把同名不同编号商品合并。用户明确取消筛选时展示全部商品。"
         "说明实际计算周期、币种和限制；销售额、冲销、净销售额分别展示，订单数包含冲销订单。"
         "当涉及口径、定义、退款/冲销时调用 retrieve_metric_rules，只引用实际返回的来源；未检索到则明确说明。"
+        "用户需要完整经营诊断或周报依据时优先调用 diagnose_business；区分全部商品与排名之外的商品。"
         "工具返回 error 时不得用失败结果计算或声称成功，可以修正参数有限重试。"
         "只输出结论和数据依据，不输出内部推理、思考过程或 scratchpad。\n"
         "当前分析条件：\n" + serialise_payload(context or {}) + "\n币种：" + df.attrs.get("currency", "未指定")
@@ -199,7 +213,7 @@ def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6
 
 
 def run_commerce_agent(model, df: pd.DataFrame, question: str, history=None, period=None,
-                       context=None, *, max_iterations=6, secrets=()) -> dict:
+                       context=None, *, max_iterations=6, secrets=(), comparison_period=None, quality=None) -> dict:
     """Run a turn, retaining completed tool evidence if any later operation fails."""
     from commerce_conversation import resolve_analysis_context, chat_history_messages, update_context_from_tools
     from model_config import safe_error
@@ -210,9 +224,9 @@ def run_commerce_agent(model, df: pd.DataFrame, question: str, history=None, per
     try:
         if not question or not question.strip():
             raise ValueError("问题不能为空")
-        resolved = resolve_analysis_context(question, period, context)
+        resolved = resolve_analysis_context(question, period, context, comparison_period)
         recorder.context = resolved
-        executor = build_commerce_agent(model, df, resolved, max_iterations)
+        executor = build_commerce_agent(model, df, resolved, max_iterations, quality)
         result = executor.invoke({"input": question.strip(), "chat_history": chat_history_messages(history)},
                                  config={"callbacks": [recorder]})
         answer = str(result.get("output", ""))
@@ -226,8 +240,8 @@ def run_commerce_agent(model, df: pd.DataFrame, question: str, history=None, per
         answer = "本次分析未完成，已执行的工具结果见下方，可重试原问题。"
     sources = []
     for record in recorder.records:
-        if record["tool"] == "retrieve_metric_rules" and record["status"] == "success" and isinstance(record["result"], dict):
-            for source in record["result"].get("sources", []):
+        if record["tool"] in {"retrieve_metric_rules", "diagnose_business"} and record["status"] == "success" and isinstance(record["result"], dict):
+            for source in record["result"].get("sources", record["result"].get("rule_sources", [])):
                 if source not in sources:
                     sources.append(source)
     resolved = update_context_from_tools(resolved, recorder.records)

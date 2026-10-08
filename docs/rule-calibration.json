@@ -1,0 +1,246 @@
+{
+  "threshold": 0.13,
+  "rule_count": 13,
+  "corpus_sha256": "377b01be139ca5c332bad5dee0a857f52e7a271b59fab4d315f5e9b6ec449227",
+  "calibration_max_negative": 0.12447805227398033,
+  "calibration_min_expected_positive": 0.14567203116095198,
+  "rounded_threshold_above_negative": 0.13,
+  "counts": {
+    "calibration": {
+      "total": 16,
+      "passed": 16
+    },
+    "validation": {
+      "total": 8,
+      "passed": 8
+    }
+  },
+  "samples": {
+    "calibration": [
+      {
+        "query": "净销售额怎么算，冲销金额怎么处理",
+        "rule_id": "CS-005",
+        "expected_rule_score": 0.14567203116095198,
+        "top_score": 0.14567203116095198,
+        "matched_rule_ids": [
+          "CS-005"
+        ],
+        "passed": true
+      },
+      {
+        "query": "成交销售额计算口径",
+        "rule_id": "CS-003",
+        "expected_rule_score": 0.24371871705308668,
+        "top_score": 0.24371871705308668,
+        "matched_rule_ids": [
+          "CS-003"
+        ],
+        "passed": true
+      },
+      {
+        "query": "退款冲销金额的计算方法",
+        "rule_id": "CS-004",
+        "expected_rule_score": 0.1873412972617123,
+        "top_score": 0.1873412972617123,
+        "matched_rule_ids": [
+          "CS-004"
+        ],
+        "passed": true
+      },
+      {
+        "query": "订单数按明细行数还是订单号去重",
+        "rule_id": "CS-006",
+        "expected_rule_score": 0.19951691114027809,
+        "top_score": 0.19951691114027809,
+        "matched_rule_ids": [
+          "CS-006"
+        ],
+        "passed": true
+      },
+      {
+        "query": "没有客户编号怎么统计客户数",
+        "rule_id": "CS-007",
+        "expected_rule_score": 0.2815052536787249,
+        "top_score": 0.2815052536787249,
+        "matched_rule_ids": [
+          "CS-007"
+        ],
+        "passed": true
+      },
+      {
+        "query": "客单价的分母包含冲销订单吗",
+        "rule_id": "CS-009",
+        "expected_rule_score": 0.23366058447179186,
+        "top_score": 0.23366058447179186,
+        "matched_rule_ids": [
+          "CS-009"
+        ],
+        "passed": true
+      },
+      {
+        "query": "商品变化贡献怎么计算，同名不同编号怎么办",
+        "rule_id": "CS-010",
+        "expected_rule_score": 0.20143587391826265,
+        "top_score": 0.20143587391826265,
+        "matched_rule_ids": [
+          "CS-010"
+        ],
+        "passed": true
+      },
+      {
+        "query": "报告订单证据会截断吗",
+        "rule_id": "CS-011",
+        "expected_rule_score": 0.15090010981408866,
+        "top_score": 0.15090010981408866,
+        "matched_rule_ids": [
+          "CS-011"
+        ],
+        "passed": true
+      },
+      {
+        "query": "数据质量中无效日期和重复明细怎么处理",
+        "rule_id": "CS-002",
+        "expected_rule_score": 0.20095977572693335,
+        "top_score": 0.20095977572693335,
+        "matched_rule_ids": [
+          "CS-002"
+        ],
+        "passed": true
+      },
+      {
+        "query": "CNY GBP 币种和金额精度",
+        "rule_id": "CS-013",
+        "expected_rule_score": 0.15216067572885533,
+        "top_score": 0.15216067572885533,
+        "matched_rule_ids": [
+          "CS-013"
+        ],
+        "passed": true
+      },
+      {
+        "query": "订单系统登录失败怎么办",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.052960674980584516,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "商品图片如何去除水印",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.061164566560480305,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "销售经理招聘流程和面试技巧",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.0707095278966802,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "如何计算广告点击率",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.040752649428790436,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "杭州明天会下雨吗",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.0,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "客户浏览器无法打开网页",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.12447805227398033,
+        "matched_rule_ids": [],
+        "passed": true
+      }
+    ],
+    "validation": [
+      {
+        "query": "净销售额等于成交销售额减去冲销金额吗",
+        "rule_id": "CS-005",
+        "expected_rule_score": 0.18986967254315906,
+        "top_score": 0.19316355638721314,
+        "matched_rule_ids": [
+          "CS-003",
+          "CS-005"
+        ],
+        "passed": true
+      },
+      {
+        "query": "客单价为什么使用周期去重订单数",
+        "rule_id": "CS-009",
+        "expected_rule_score": 0.21747972645203156,
+        "top_score": 0.21747972645203156,
+        "matched_rule_ids": [
+          "CS-009",
+          "CS-006"
+        ],
+        "passed": true
+      },
+      {
+        "query": "商品贡献比例能超过100%吗",
+        "rule_id": "CS-010",
+        "expected_rule_score": 0.1569799063597779,
+        "top_score": 0.1569799063597779,
+        "matched_rule_ids": [
+          "CS-010"
+        ],
+        "passed": true
+      },
+      {
+        "query": "订单时间的结束日包含全天吗",
+        "rule_id": "CS-001",
+        "expected_rule_score": 0.13611605939769106,
+        "top_score": 0.13611605939769106,
+        "matched_rule_ids": [
+          "CS-001"
+        ],
+        "passed": true
+      },
+      {
+        "query": "订单服务器磁盘空间不足怎么处理",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.04152797801543571,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "商品标题字体如何修改",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.07074792828482335,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "销售团队团建活动怎么安排",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.07265092526484272,
+        "matched_rule_ids": [],
+        "passed": true
+      },
+      {
+        "query": "怎么创建GitHub仓库",
+        "rule_id": null,
+        "expected_rule_score": null,
+        "top_score": 0.07107120547080831,
+        "matched_rule_ids": [],
+        "passed": true
+      }
+    ]
+  }
+}

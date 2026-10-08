@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import os
+import io
+import pandas as pd
 import unittest
 from unittest.mock import patch
 
@@ -30,7 +32,7 @@ class CommerceUITests(unittest.TestCase):
         self.assertEqual(app.selectbox(key="commerce_currency_choice").value, "CNY")
         self.assertFalse(app.toggle(key="commerce_advanced_enabled").value)
         self.assertFalse(any(area.key == "commerce_advanced_request" for area in app.text_area))
-        self.assertTrue(any("阶段 C" in item.value for item in app.info))
+        self.assertTrue(any(button.key == "generate_commerce_report" for button in app.button))
         self.assertTrue(any(expander.label == "数据质量详情" for expander in app.expander))
 
     def test_chat_failure_retry_and_clear_preserve_page_period(self):
@@ -64,6 +66,33 @@ class CommerceUITests(unittest.TestCase):
             self.assertNotIn("commerce_messages", app.session_state)
             self.assertNotIn("commerce_chat_context", app.session_state)
             self.assertEqual(str(app.date_input(key="commerce_current_period").value[0]), "2026-09-01")
+
+    def test_report_generation_downloads_ai_failure_and_changed_period_invalidation(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            app = self.sample_app()
+            app.date_input(key="commerce_current_period").set_value(("2026-09-08", "2026-09-09")).run()
+            app.date_input(key="commerce_previous_period").set_value(("2026-09-01", "2026-09-02")).run()
+            app.button(key="generate_commerce_report").click().run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertEqual(len(app.error), 0)
+            saved = app.session_state["commerce_report"]
+            self.assertEqual(saved["result"].delta_minor, -4380)
+            report_table = [table.value for table in app.dataframe if list(table.value.columns) == ["指标", "当前周期", "对比周期", "变化量", "变化比例（%）"]][-1].set_index("指标")
+            exported = pd.read_csv(io.BytesIO(saved["bundle"].metrics_csv), dtype=str).set_index("metric")
+            self.assertEqual(report_table.loc["净销售额", "变化量"], exported.loc["net_sales", "delta"])
+            self.assertEqual(report_table.loc["净销售额", "当前周期"], exported.loc["net_sales", "current"])
+            labels = [element.proto.label for element in app.get("download_button")]
+            self.assertIn("下载完整报告包（ZIP，含图表 PNG）", labels)
+            self.assertEqual(len(labels), 5)
+            original_zip = saved["bundle"].zip_bytes
+            app.button(key="add_report_ai").click().run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertTrue(app.session_state["commerce_report"]["result"].ai_error)
+            self.assertEqual(app.session_state["commerce_report"]["bundle"].zip_bytes, original_zip)
+            app.date_input(key="commerce_previous_period").set_value(("2026-09-03", "2026-09-04")).run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertNotIn("commerce_report", app.session_state)
+            self.assertEqual(len(app.get("download_button")), 0)
 
     def test_mapping_rerun_and_date_interaction_share_standard_data(self):
         state = {}

@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 DATE_PATTERN = r"(?<!\d)(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?(?!\d)"
 
 
-def resolve_analysis_context(question, period, previous=None):
+def resolve_analysis_context(question, period, previous=None, comparison_period=None):
     if not period or len(period) != 2:
         raise ValueError("请先在经营概览选择完整的起止日期")
     selected = [str(pd.Timestamp(value).date()) for value in period]
@@ -20,9 +20,13 @@ def resolve_analysis_context(question, period, previous=None):
     dates = [str(pd.Timestamp(year=int(y), month=int(m), day=int(d)).date())
              for y, m, d in re.findall(DATE_PATTERN, question)]
     context = dict(previous)
+    selected_comparison = [str(pd.Timestamp(value).date()) for value in comparison_period] if comparison_period and len(comparison_period) == 2 else None
     if previous.get("selected_period") != selected:
         for key in ("current_start", "current_end", "previous_start", "previous_end"):
             context.pop(key, None)
+    if selected_comparison != previous.get("selected_comparison"):
+        context.pop("previous_start", None)
+        context.pop("previous_end", None)
     if dates:
         context.update(current_start=dates[0], current_end=dates[1] if len(dates) >= 2 else dates[0])
         context["period_source"] = "当前问题指定"
@@ -36,11 +40,15 @@ def resolve_analysis_context(question, period, previous=None):
     if len(dates) >= 4:
         context.update(previous_start=dates[2], previous_end=dates[3])
     elif dates or "previous_start" not in context:
-        previous_end = start - timedelta(days=1)
-        context.update(previous_start=str((previous_end - (end - start)).date()), previous_end=str(previous_end.date()))
+        if selected_comparison and not dates:
+            context.update(previous_start=selected_comparison[0], previous_end=selected_comparison[1])
+        else:
+            previous_end = start - timedelta(days=1)
+            context.update(previous_start=str((previous_end - (end - start)).date()), previous_end=str(previous_end.date()))
     if pd.Timestamp(context["previous_start"]) > pd.Timestamp(context["previous_end"]):
         raise ValueError("对比周期结束日期不能早于开始日期")
     context["selected_period"] = selected
+    context["selected_comparison"] = selected_comparison
     context["question_has_explicit_period"] = bool(dates)
     context["question_has_explicit_comparison"] = len(dates) >= 4
     product = re.search(r"(?:id|name):[^\s，。；？！,;!?]+", question)
@@ -79,7 +87,7 @@ def update_context_from_tools(context, records):
             continue
         if record["tool"] in {"get_period_metrics", "drilldown_orders"}:
             current = {"current_start": params["start"], "current_end": params["end"]}
-        elif record["tool"] in {"compare_period_metrics", "rank_product_contribution"}:
+        elif record["tool"] in {"compare_period_metrics", "rank_product_contribution", "diagnose_business"}:
             current = {key: params[key] for key in ("current_start", "current_end", "previous_start", "previous_end")}
         else:
             current = {}

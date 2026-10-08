@@ -13,6 +13,7 @@ from commerce_data import COMMERCE_FIELDS, prepare_commerce_data
 from commerce_metrics import calculate_metrics, compare_periods, product_contribution, order_drilldown
 from commerce_session import load_dataset, apply_dataset_mapping, clear_conversation
 from model_config import PROVIDERS, resolve_model_settings, create_chat_model, safe_error
+from report_ui import render_report
 
 
 METRIC_LABELS = {
@@ -166,8 +167,16 @@ def render_overview(data):
         st.info("当前周期没有有效记录，销售额为 0，客单价不适用。")
     previous_end = start - timedelta(days=1)
     previous_start = previous_end - (end - start)
+    if st.session_state.get("commerce_comparison_anchor") != period:
+        st.session_state["commerce_previous_period"] = (previous_start, previous_end)
+        st.session_state["commerce_comparison_anchor"] = period
+    previous_period = st.date_input("对比分析周期", key="commerce_previous_period")
+    if not isinstance(previous_period, tuple) or len(previous_period) != 2:
+        st.info("请选择完整的对比分析周期。")
+        return period
+    previous_start, previous_end = previous_period
     st.markdown("#### 周期对比")
-    st.caption(f"对比同等天数的相邻周期：{previous_start} 至 {previous_end}。基期为 0 时变化比例不适用。")
+    st.caption(f"对比周期：{previous_start} 至 {previous_end}。默认使用同等天数的相邻周期，可手动修改。基期为 0 时变化比例不适用。")
     comparison = compare_periods(data, start, end, previous_start, previous_end)
     comparison["metric"] = comparison["metric"].map(METRIC_LABELS)
     st.dataframe(comparison.rename(columns={"metric": "指标", "current": "当前周期", "previous": "对比周期",
@@ -190,7 +199,7 @@ def render_overview(data):
                             format_func=lambda key: f"{products[key]}（{key}）" if key else "全部商品")
     details = order_drilldown(data, start, end, selected or None)
     labels = {field: label for field, label, _ in COMMERCE_FIELDS}
-    labels.update(line_amount="明细金额", record_type="记录类型")
+    labels.update(line_amount="明细金额", line_amount_minor="明细金额（分）", record_type="记录类型")
     st.caption(f"共 {len(details)} 条，预览前 200 条；下钻条件不会自动修改助手对话中讨论的商品。")
     st.dataframe(details.head(200).rename(columns=labels), hide_index=True, width="stretch")
     return period
@@ -215,7 +224,7 @@ def render_assistant_result(result):
     if result.get("rule_sources"):
         with st.expander("规则来源", expanded=False):
             st.json(result["rule_sources"])
-            st.caption("来源来自本轮实际检索；命中的原文见 retrieve_metric_rules 工具结果。规则检索精度将在阶段 C 优化。")
+            st.caption("仅展示本轮实际检索或诊断所引用的规则；原文、版本和相关性分数见工具结构化结果。未命中时明确返回“未找到规则”。")
 
 
 def submit_question(question, data, period, config):
@@ -228,7 +237,7 @@ def submit_question(question, data, period, config):
         settings = resolve_model_settings(provider, model_name, key)
         model = create_chat_model(settings)
         result = run_commerce_agent(model, data, question, history, period, state.get("commerce_chat_context"),
-                                    secrets=(settings.api_key,))
+                                    secrets=(settings.api_key,), comparison_period=state.get("commerce_previous_period"), quality=state.get("commerce_quality"))
     except Exception as exc:
         result = {"answer": "问题已保留，配置模型后可以重试。", "error": safe_error(exc, (key,)),
                   "tool_calls": [], "rule_sources": [], "context": {}, "currency": data.attrs["currency"]}
@@ -320,5 +329,4 @@ def run_app():
     with assistant:
         render_assistant(data, period, config)
     with report:
-        st.subheader("经营报告")
-        st.info("完整经营诊断、周报预览及下载将在阶段 C 完成。当前可在经营概览核对指标、商品贡献和订单证据。")
+        render_report(data, period, st.session_state.get("commerce_previous_period"), config)

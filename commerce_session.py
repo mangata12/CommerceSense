@@ -16,6 +16,7 @@ RESULT_KEYS = CHAT_KEYS | {
     "_nlq_last_answer", "_nlq_prefill", "_nlq_suggestions", "nlq_question",
     "_viz_prefill", "_viz_suggestions", "viz_request",
     "commerce_advanced_result", "commerce_advanced_request",
+    "commerce_previous_period", "commerce_comparison_anchor",
 }
 
 

@@ -58,8 +58,8 @@ def calculate_metrics(df: pd.DataFrame, start: date | str | pd.Timestamp, end: d
         "gross_sales": int(positive.sum()) / 100,
         "reversal_amount": int(-negative.sum()) / 100,
         "net_sales": int(amounts.sum()) / 100,
-        "units_sold": round(float(period.loc[period["_quantity"] > 0, "_quantity"].sum()), 2),
-        "reversed_units": round(max(0.0, float(-period.loc[period["_quantity"] < 0, "_quantity"].sum())), 2),
+        "units_sold": float(period.loc[period["_quantity"] > 0, "_quantity"].sum()),
+        "reversed_units": max(0.0, float(-period.loc[period["_quantity"] < 0, "_quantity"].sum())),
     }
     metrics["average_order_value"] = float(
         (Decimal(metrics["net_sales_minor"]) / metrics["order_count"] / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -98,7 +98,7 @@ def compare_periods(
                 delta = (current_minor - previous_minor) / 100
                 change_percent = _change_percent(current_minor, previous_minor)
             else:
-                delta = round(current_value - previous_value, 2)
+                delta = float(Decimal(str(current_value)) - Decimal(str(previous_value))) if key in {"units_sold", "reversed_units"} else round(current_value - previous_value, 2)
                 change_percent = _change_percent(current_value, previous_value)
         rows.append({"metric": key, "current": current_value, "previous": previous_value, "delta": delta, "change_percent": change_percent})
     return pd.DataFrame(rows)
@@ -175,10 +175,22 @@ def order_drilldown(
         result = result.loc[matches]
 
     result["line_amount"] = result["_line_amount"]
+    result["line_amount_minor"] = result["_line_amount_minor"]
     result["record_type"] = result["_line_amount"].apply(lambda value: "销售" if value >= 0 else "冲销")
     output_columns = [
         column for column in (
-            "order_id", "product_id", "product_name", "quantity", "unit_price", "order_time", "customer_id", "country", "line_amount", "record_type"
+            "order_id", "product_id", "product_name", "quantity", "unit_price", "order_time", "customer_id", "country", "line_amount_minor", "line_amount", "record_type"
         ) if column in result.columns
     ]
     return result.sort_values("_order_time")[output_columns]
+
+
+def daily_net_sales(df, start, end):
+    """A zero-filled daily series derived from the same valid integer amounts."""
+    period = filter_period(df, start, end)
+    values = period.groupby(period["_order_time"].dt.normalize())["_line_amount_minor"].sum()
+    days = pd.date_range(pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize(), freq="D")
+    values = values.reindex(days, fill_value=0)
+    return pd.DataFrame({"date": days.strftime("%Y-%m-%d"),
+                         "net_sales_minor": pd.Series(list(values), dtype=object),
+                         "net_sales": [int(value) / 100 for value in values]})
