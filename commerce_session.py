@@ -17,6 +17,7 @@ RESULT_KEYS = CHAT_KEYS | {
     "_viz_prefill", "_viz_suggestions", "viz_request",
     "commerce_advanced_result", "commerce_advanced_request",
     "commerce_previous_period", "commerce_comparison_anchor",
+    "commerce_view_cache",
 }
 
 
@@ -42,6 +43,7 @@ def load_dataset(state, uploaded_file) -> bool:
     if not raw.columns.is_unique:
         raise ValueError("列名必须唯一")
     clear_analysis(state)
+    state.pop("commerce_preview", None)
     for key in list(state):
         if key.startswith("commerce_mapping_"):
             state.pop(key, None)
@@ -58,8 +60,17 @@ def load_dataset(state, uploaded_file) -> bool:
     return True
 
 
+def prepared_preview(state, mapping, currency):
+    signature = (state.get("commerce_file_fingerprint"), tuple(sorted(mapping.items())), currency)
+    saved = state.get("commerce_preview")
+    if saved is None or saved[0] != signature:
+        saved = (signature, prepare_commerce_data(state["commerce_raw_df"], mapping, currency))
+        state["commerce_preview"] = saved
+    return saved[1]
+
+
 def apply_dataset_mapping(state, mapping, currency):
-    prepared = prepare_commerce_data(state["commerce_raw_df"], mapping, currency)
+    prepared = prepared_preview(state, mapping, currency)
     if prepared["quality"]["missing_required"]:
         raise ValueError("请映射订单号、数量、单价、订单时间")
     clear_analysis(state)

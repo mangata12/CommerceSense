@@ -5,17 +5,49 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
 
 import pandas as pd
 from commerce_data import parse_commerce_rows
 
 
 REQUIRED_METRIC_COLUMNS = ("order_id", "quantity", "unit_price", "order_time")
+_ACTIVE_METRICS = ContextVar("commerce_active_metrics", default=None)
+
+
+@contextmanager
+def metrics_snapshot(df):
+    """Reuse one parsed snapshot within a read-only calculation, never globally."""
+    active = _ACTIVE_METRICS.get()
+    if active is not None and active[0] is df:
+        yield
+        return
+    token = _ACTIVE_METRICS.set((df, prepare_metrics_frame(df)))
+    try:
+        yield
+    finally:
+        _ACTIVE_METRICS.reset(token)
+
+
+def with_metrics_snapshot(function):
+    @wraps(function)
+    def calculate(*args, **kwargs):
+        df = args[0] if args else kwargs.get("df", kwargs.get("data"))
+        if df is None:
+            return function(*args, **kwargs)
+        with metrics_snapshot(df):
+            return function(*args, **kwargs)
+    return calculate
 
 
 def prepare_metrics_frame(df: pd.DataFrame) -> pd.DataFrame:
     """Parse canonical columns and add a line-level amount without dropping rows."""
 
+    active = _ACTIVE_METRICS.get()
+    if active is not None and active[0] is df:
+        return active[1]
     missing = [column for column in REQUIRED_METRIC_COLUMNS if column not in df.columns]
     if missing:
         raise ValueError("Missing canonical commerce columns: " + ", ".join(missing))
@@ -36,6 +68,7 @@ def filter_period(df: pd.DataFrame, start: date | str | pd.Timestamp, end: date 
     return prepared.loc[mask].copy()
 
 
+@with_metrics_snapshot
 def calculate_metrics(df: pd.DataFrame, start: date | str | pd.Timestamp, end: date | str | pd.Timestamp) -> dict[str, Any]:
     """Calculate sales metrics for one inclusive date range."""
 
@@ -73,6 +106,7 @@ def _change_percent(current: float, previous: float) -> float | None:
     return round((current - previous) / abs(previous) * 100, 2)
 
 
+@with_metrics_snapshot
 def compare_periods(
     df: pd.DataFrame,
     current_start: date | str | pd.Timestamp,
@@ -104,6 +138,7 @@ def compare_periods(
     return pd.DataFrame(rows)
 
 
+@with_metrics_snapshot
 def product_contribution(
     df: pd.DataFrame,
     current_start: date | str | pd.Timestamp,
@@ -153,6 +188,13 @@ def _with_product_keys(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def product_catalog(df):
+    """Product selector labels without computing a fake full-period comparison."""
+    labels = _with_product_keys(df)[["product_key", "product"]].drop_duplicates("product_key", keep="last").sort_values("product_key")
+    return dict(zip(labels["product_key"], labels["product"]))
+
+
+@with_metrics_snapshot
 def order_drilldown(
     df: pd.DataFrame,
     start: date | str | pd.Timestamp,
@@ -185,6 +227,7 @@ def order_drilldown(
     return result.sort_values("_order_time")[output_columns]
 
 
+@with_metrics_snapshot
 def daily_net_sales(df, start, end):
     """A zero-filled daily series derived from the same valid integer amounts."""
     period = filter_period(df, start, end)

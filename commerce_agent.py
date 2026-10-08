@@ -10,6 +10,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from commerce_metrics import calculate_metrics, compare_periods, order_drilldown, product_contribution
 from rag_knowledge import default_knowledge_base
+from model_identity import configured_identity_answer, model_identity_instruction
 
 
 def serialise_payload(value: Any) -> str:
@@ -179,7 +180,7 @@ class ToolExecutionRecorder(BaseCallbackHandler):
             record.update(status="error", result={"error": safe_error(error, self.secrets)})
 
 
-def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6, quality=None):
+def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6, quality=None, model_identity=None):
     """One verified path for installed LangChain 0.3: tool-calling executor."""
     from langchain.agents import AgentExecutor, create_tool_calling_agent
     from langchain_core.messages import SystemMessage
@@ -198,7 +199,7 @@ def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6
         "用户需要完整经营诊断或周报依据时优先调用 diagnose_business；区分全部商品与排名之外的商品。"
         "工具返回 error 时不得用失败结果计算或声称成功，可以修正参数有限重试。"
         "只输出结论和数据依据，不输出内部推理、思考过程或 scratchpad。\n"
-        "当前分析条件：\n" + serialise_payload(context or {}) + "\n币种：" + df.attrs.get("currency", "未指定")
+        + model_identity_instruction(model_identity) + "\n当前分析条件：\n" + serialise_payload(context or {}) + "\n币种：" + df.attrs.get("currency", "未指定")
     )
     prompt = ChatPromptTemplate.from_messages([
         SystemMessage(content=system_prompt),
@@ -213,7 +214,7 @@ def build_commerce_agent(model, df: pd.DataFrame, context=None, max_iterations=6
 
 
 def run_commerce_agent(model, df: pd.DataFrame, question: str, history=None, period=None,
-                       context=None, *, max_iterations=6, secrets=(), comparison_period=None, quality=None) -> dict:
+                       context=None, *, max_iterations=6, secrets=(), comparison_period=None, quality=None, model_identity=None) -> dict:
     """Run a turn, retaining completed tool evidence if any later operation fails."""
     from commerce_conversation import resolve_analysis_context, chat_history_messages, update_context_from_tools
     from model_config import safe_error
@@ -226,10 +227,14 @@ def run_commerce_agent(model, df: pd.DataFrame, question: str, history=None, per
             raise ValueError("问题不能为空")
         resolved = resolve_analysis_context(question, period, context, comparison_period)
         recorder.context = resolved
-        executor = build_commerce_agent(model, df, resolved, max_iterations, quality)
-        result = executor.invoke({"input": question.strip(), "chat_history": chat_history_messages(history)},
-                                 config={"callbacks": [recorder]})
-        answer = str(result.get("output", ""))
+        identity_answer = configured_identity_answer(question, model_identity)
+        if identity_answer:
+            answer = identity_answer
+        else:
+            executor = build_commerce_agent(model, df, resolved, max_iterations, quality, model_identity)
+            result = executor.invoke({"input": question.strip(), "chat_history": chat_history_messages(history)},
+                                     config={"callbacks": [recorder]})
+            answer = str(result.get("output", ""))
         if answer.startswith("Agent stopped due to"):
             error = "已达到工具调用轮次或运行时间限制，请缩小问题范围后重试。"
             answer = "本次分析未完成，已执行的工具结果见下方。"
@@ -246,4 +251,4 @@ def run_commerce_agent(model, df: pd.DataFrame, question: str, history=None, per
                     sources.append(source)
     resolved = update_context_from_tools(resolved, recorder.records)
     return {"answer": answer, "tool_calls": recorder.records, "rule_sources": sources,
-            "error": error, "context": resolved, "currency": df.attrs.get("currency", "未指定")}
+            "error": error, "context": resolved, "currency": df.attrs.get("currency", "未指定"), "model_identity": model_identity}

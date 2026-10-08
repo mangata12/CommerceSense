@@ -9,9 +9,11 @@ import pandas as pd
 import streamlit as st
 
 from commerce_agent import run_commerce_agent
-from commerce_data import COMMERCE_FIELDS, prepare_commerce_data
-from commerce_metrics import calculate_metrics, compare_periods, product_contribution, order_drilldown
-from commerce_session import load_dataset, apply_dataset_mapping, clear_conversation
+from commerce_data import COMMERCE_FIELDS
+from commerce_metrics import calculate_metrics, compare_periods, product_contribution, order_drilldown, metrics_snapshot, product_catalog
+from commerce_session import load_dataset, apply_dataset_mapping, clear_conversation, prepared_preview
+from commerce_view_cache import cached_view
+from model_identity import public_model_identity, configured_identity_answer
 from model_config import PROVIDERS, resolve_model_settings, create_chat_model, safe_error
 from report_ui import render_report
 
@@ -42,6 +44,7 @@ def model_sidebar():
                                 help=f"仅当前会话使用；留空时读取启动环境中的 {variable}。")
             st.caption("请求超时 45 秒，失败最多重试 1 次；助手最多执行 6 轮工具调用。")
         st.caption("数据导入、经营概览无需密钥。需要问答时再配置模型。")
+        st.caption(f"当前模型配置：{provider} / {model_name}")
     return provider, model_name, key
 
 
@@ -72,10 +75,10 @@ def render_quality(raw, preview):
             st.caption("以下展示前 100 条排除记录；_source_row 为源表行号（含表头）。")
             st.dataframe(preview["excluded"].head(100), hide_index=True, width="stretch")
         st.markdown("**原始列概况**")
-        st.dataframe(pd.DataFrame([{"列名": str(column), "数据类型": str(raw[column].dtype),
+        summary = cached_view(st.session_state, "raw_columns", (), lambda: pd.DataFrame([{"列名": str(column), "数据类型": str(raw[column].dtype),
                                    "空值数": int((raw[column].isna() | raw[column].eq("")).sum()),
-                                   "不同值数": int(raw[column].nunique())} for column in raw]),
-                     hide_index=True, width="stretch")
+                                   "不同值数": int(raw[column].nunique())} for column in raw]))
+        st.dataframe(summary, hide_index=True, width="stretch")
         st.markdown("**原始数据预览**")
         st.dataframe(raw.head(20), hide_index=True, width="stretch")
 
@@ -114,7 +117,7 @@ def render_import():
                                   key=f"commerce_mapping_{field}")
         if source != "(未映射)":
             selected[field] = source
-    preview = prepare_commerce_data(raw, selected, currency if currency != "请选择币种" else "CNY")
+    preview = prepared_preview(st.session_state, selected, currency if currency != "请选择币种" else "CNY")
     quality = preview["quality"]
     render_quality(raw, preview)
     if quality["missing_required"]:
@@ -140,19 +143,40 @@ def money(minor):
     return f"{Decimal(minor) / 100:,.2f}"
 
 
+def overview_results(data, period, previous_period, has_products):
+    with metrics_snapshot(data):
+        return {"metrics": calculate_metrics(data, *period),
+                "comparison": compare_periods(data, *period, *previous_period),
+                "contribution": product_contribution(data, *period, *previous_period, top_n=None) if has_products else None}
+
+
 def render_overview(data):
     st.subheader("经营概览")
     if data is None:
         st.info("先在数据导入中加载数据并应用字段映射。")
         return None
     currency = data.attrs["currency"]
-    times = pd.to_datetime(data["order_time"])
-    period = st.date_input("当前分析周期", value=(times.min().date(), times.max().date()), key="commerce_current_period")
+    bounds = cached_view(st.session_state, "date_bounds", (), lambda: (
+        pd.Timestamp(data["order_time"].min()).date(), pd.Timestamp(data["order_time"].max()).date()))
+    period = st.date_input("当前分析周期", value=bounds, key="commerce_current_period")
     if not isinstance(period, tuple) or len(period) != 2:
         st.info("请选择完整的起止日期。")
         return None
     start, end = period
-    metrics = calculate_metrics(data, start, end)
+    previous_end = start - timedelta(days=1)
+    previous_start = previous_end - (end - start)
+    if st.session_state.get("commerce_comparison_anchor") != period:
+        st.session_state["commerce_previous_period"] = (previous_start, previous_end)
+        st.session_state["commerce_comparison_anchor"] = period
+    previous_period = st.date_input("对比分析周期", key="commerce_previous_period")
+    if not isinstance(previous_period, tuple) or len(previous_period) != 2:
+        st.info("请选择完整的对比分析周期。")
+        return period
+    previous_start, previous_end = previous_period
+    has_products = not st.session_state["commerce_quality"]["missing_product"]
+    results = cached_view(st.session_state, "overview", (period, previous_period),
+                          lambda: overview_results(data, period, previous_period, has_products))
+    metrics = results["metrics"]
     columns = st.columns(4)
     for column, label, value in zip(columns, ["净销售额", "成交销售额", "冲销金额", "周期去重订单数"],
                                      [money(metrics["net_sales_minor"]) + " " + currency,
@@ -165,19 +189,9 @@ def render_overview(data):
                               for key, label in METRIC_LABELS.items()]), hide_index=True, width="stretch")
     if metrics["row_count"] == 0:
         st.info("当前周期没有有效记录，销售额为 0，客单价不适用。")
-    previous_end = start - timedelta(days=1)
-    previous_start = previous_end - (end - start)
-    if st.session_state.get("commerce_comparison_anchor") != period:
-        st.session_state["commerce_previous_period"] = (previous_start, previous_end)
-        st.session_state["commerce_comparison_anchor"] = period
-    previous_period = st.date_input("对比分析周期", key="commerce_previous_period")
-    if not isinstance(previous_period, tuple) or len(previous_period) != 2:
-        st.info("请选择完整的对比分析周期。")
-        return period
-    previous_start, previous_end = previous_period
     st.markdown("#### 周期对比")
     st.caption(f"对比周期：{previous_start} 至 {previous_end}。默认使用同等天数的相邻周期，可手动修改。基期为 0 时变化比例不适用。")
-    comparison = compare_periods(data, start, end, previous_start, previous_end)
+    comparison = results["comparison"].copy()
     comparison["metric"] = comparison["metric"].map(METRIC_LABELS)
     st.dataframe(comparison.rename(columns={"metric": "指标", "current": "当前周期", "previous": "对比周期",
                                              "delta": "变化量", "change_percent": "变化比例（%）"}), hide_index=True, width="stretch")
@@ -186,27 +200,32 @@ def render_overview(data):
     if st.session_state["commerce_quality"]["missing_product"]:
         st.info("未提供商品字段，无法进行商品贡献分析。")
     else:
-        contribution = product_contribution(data, start, end, previous_start, previous_end, top_n=None)
+        contribution = results["contribution"]
         st.caption(f"共 {len(contribution)} 个商品，按变化绝对值展示前 10 个。")
         st.dataframe(contribution.head(10).drop(columns=["current_minor", "previous_minor", "delta_minor"]).rename(
             columns={"product_key": "商品标识", "product": "商品名称", "current_net_sales": "当前净销售额",
                      "previous_net_sales": "对比净销售额", "delta": "变化量", "contribution_percent": "贡献比例（%）"}),
             hide_index=True, width="stretch")
-        all_products = product_contribution(data, times.min(), times.max(), times.min(), times.max(), top_n=None)
-        products = dict(zip(all_products["product_key"], all_products["product"]))
+        products = cached_view(st.session_state, "products", (), lambda: product_catalog(data))
     st.markdown("#### 订单明细")
     selected = st.selectbox("订单下钻商品筛选（精确标识）", ["", *products], key="commerce_product_filter",
                             format_func=lambda key: f"{products[key]}（{key}）" if key else "全部商品")
-    details = order_drilldown(data, start, end, selected or None)
+    def detail_preview():
+        rows = order_drilldown(data, start, end, selected or None)
+        return len(rows), rows.head(200)
+    detail_count, details = cached_view(st.session_state, "details", (period, selected), detail_preview)
     labels = {field: label for field, label, _ in COMMERCE_FIELDS}
     labels.update(line_amount="明细金额", line_amount_minor="明细金额（分）", record_type="记录类型")
-    st.caption(f"共 {len(details)} 条，预览前 200 条；下钻条件不会自动修改助手对话中讨论的商品。")
+    st.caption(f"共 {detail_count} 条，预览前 200 条；下钻条件不会自动修改助手对话中讨论的商品。")
     st.dataframe(details.head(200).rename(columns=labels), hide_index=True, width="stretch")
     return period
 
 
 def render_assistant_result(result):
     context = result.get("context", {})
+    identity = result.get("model_identity")
+    if identity:
+        st.caption(f"本次模型配置：{identity['provider']} / {identity['model_name']}")
     if context.get("current_start"):
         st.caption(f"分析周期：{context['current_start']} 至 {context['current_end']}（{context['period_source']}）；币种：{result['currency']}。")
     st.markdown(result["answer"])
@@ -233,14 +252,17 @@ def submit_question(question, data, period, config):
     messages = state.setdefault("commerce_messages", [])
     messages.append({"role": "user", "content": question})
     provider, model_name, key = config
+    identity = public_model_identity(provider, model_name)
     try:
-        settings = resolve_model_settings(provider, model_name, key)
-        model = create_chat_model(settings)
+        identity_answer = configured_identity_answer(question, identity)
+        settings = None if identity_answer else resolve_model_settings(provider, model_name, key)
+        model = None if identity_answer else create_chat_model(settings)
         result = run_commerce_agent(model, data, question, history, period, state.get("commerce_chat_context"),
-                                    secrets=(settings.api_key,), comparison_period=state.get("commerce_previous_period"), quality=state.get("commerce_quality"))
+                                    secrets=(settings.api_key,) if settings else (), comparison_period=state.get("commerce_previous_period"),
+                                    quality=state.get("commerce_quality"), model_identity=identity)
     except Exception as exc:
         result = {"answer": "问题已保留，配置模型后可以重试。", "error": safe_error(exc, (key,)),
-                  "tool_calls": [], "rule_sources": [], "context": {}, "currency": data.attrs["currency"]}
+                  "tool_calls": [], "rule_sources": [], "context": {}, "currency": data.attrs["currency"], "model_identity": identity}
     messages.append({"role": "assistant", "content": result["answer"], "result": result})
     if result.get("context"):
         state["commerce_chat_context"] = result["context"]
@@ -274,6 +296,7 @@ def render_assistant(data, period, config):
     render_advanced_tools(data, config)
 
 
+@st.fragment
 def render_advanced_tools(data, config):
     with st.expander("高级工具（默认关闭）", expanded=False):
         enabled = st.toggle("启用高级工具", value=False, key="commerce_advanced_enabled")
@@ -281,26 +304,39 @@ def render_advanced_tools(data, config):
             st.caption("包含自然语言查询、自由绘图和数据处理。")
             return
         st.warning("这些工具会执行模型生成的 Python 代码，不能视为安全沙箱。请仅在可信的本地环境使用可信数据；处理结果不会覆盖经营数据。")
-        mode = st.selectbox("工具类型", ["自然语言查询", "自由绘图", "数据处理"], key="commerce_advanced_mode")
-        request = st.text_area("描述需求", key="commerce_advanced_request")
-        if st.button("执行高级工具", disabled=not request.strip()):
+        identity = public_model_identity(*config[:2])
+        st.caption(f"当前模型配置：{identity['provider']} / {identity['model_name']}")
+        with st.form("commerce_advanced_form"):
+            mode = st.selectbox("工具类型", ["自然语言查询", "自由绘图", "数据处理"], key="commerce_advanced_mode")
+            request = st.text_area("描述需求", key="commerce_advanced_request")
+            submitted = st.form_submit_button("执行高级工具", key="execute_advanced")
+        if submitted and not request.strip():
+            st.warning("请先输入需求。")
+        elif submitted:
             try:
-                settings = resolve_model_settings(*config)
-                model = create_chat_model(settings)
-                from advanced_tools import answer_nlq_text, generate_and_render_chart, manipulate_dataframe_with_llm
-                with st.spinner("正在执行高级工具…"):
-                    if mode == "自然语言查询":
-                        result = {"mode": mode, "answer": answer_nlq_text(model, data, request)}
-                    elif mode == "自由绘图":
-                        figure, code, error = generate_and_render_chart(model, data, request)
-                        result = {"mode": mode, "figure": figure, "code": code, "error": error}
-                    else:
-                        frame, code, error = manipulate_dataframe_with_llm(model, data, request)
-                        result = {"mode": mode, "frame": frame, "code": code, "error": error}
-                st.session_state["commerce_advanced_result"] = result
+                identity_answer = configured_identity_answer(request, identity)
+                if identity_answer:
+                    result = {"mode": mode, "answer": identity_answer}
+                else:
+                    settings = resolve_model_settings(*config)
+                    model = create_chat_model(settings)
+                    from advanced_tools import answer_nlq_text, generate_and_render_chart, manipulate_dataframe_with_llm
+                    with st.spinner("正在执行高级工具…"):
+                        if mode == "自然语言查询":
+                            result = {"mode": mode, "answer": answer_nlq_text(model, data, request, model_identity=identity)}
+                        elif mode == "自由绘图":
+                            figure, code, error = generate_and_render_chart(model, data, request)
+                            result = {"mode": mode, "figure": figure, "code": code, "error": error}
+                        else:
+                            frame, code, error = manipulate_dataframe_with_llm(model, data, request)
+                            result = {"mode": mode, "frame": frame, "code": code, "error": error}
+                st.session_state["commerce_advanced_result"] = {**result, "model_identity": identity}
             except Exception as exc:
-                st.session_state["commerce_advanced_result"] = {"mode": mode, "error": safe_error(exc, (config[2],))}
+                st.session_state["commerce_advanced_result"] = {"mode": mode, "error": safe_error(exc, (config[2],)), "model_identity": identity}
         result = st.session_state.get("commerce_advanced_result")
+        if result and result.get("model_identity") != identity:
+            st.session_state.pop("commerce_advanced_result", None)
+            result = None
         if result:
             if result.get("error"):
                 st.error(safe_error(result["error"], (config[2],)))

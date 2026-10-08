@@ -114,9 +114,9 @@ def parse_commerce_rows(df: pd.DataFrame) -> pd.DataFrame:
     prices = result.get("unit_price", pd.Series([None] * len(result))).map(_decimal)
     order_ids = result.get("order_id", pd.Series("", index=result.index))
     reasons, amounts = [], []
-    for index, (quantity, price, timestamp) in enumerate(zip(quantities, prices, times)):
+    for quantity, price, timestamp, order_id in zip(quantities, prices, times, order_ids):
         errors = []
-        if not order_ids.iloc[index]:
+        if not order_id:
             errors.append("empty_order_id")
         if pd.isna(timestamp):
             errors.append("invalid_order_time")

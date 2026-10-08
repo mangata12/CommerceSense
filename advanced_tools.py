@@ -9,6 +9,7 @@ from langchain.prompts import PromptTemplate
 from langchain.output_parsers import StructuredOutputParser, ResponseSchema
 from langchain_core.output_parsers import StrOutputParser
 from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
+from model_identity import configured_identity_answer, model_identity_instruction
 
 # ----------------------------
 # Helpers: Suggestion normalization
@@ -395,7 +396,10 @@ that can help a data analyst gain deeper insights into this dataset.
 # ----------------------------
 # NLQ answering: use agent executor to execute pandas code (like NLQ.ipynb)
 # ----------------------------
-def answer_nlq_text(model, df: pd.DataFrame, question: str) -> str:
+def answer_nlq_text(model, df: pd.DataFrame, question: str, *, model_identity=None) -> str:
+    identity_answer = configured_identity_answer(question, model_identity)
+    if identity_answer:
+        return identity_answer
     system_prompt = """
 You are a safe data analysis assistant.
 You are allowed to manipulate data using pandas operations like filtering, grouping, sorting, merging, etc.
@@ -407,7 +411,7 @@ You must **not** execute or suggest any commands that:
 
 If the user asks for something unsafe, politely refuse.
 When answering, provide specific numbers and results from the data, not approximations.
-"""
+""" + "\n" + model_identity_instruction(model_identity)
 
     try:
         # Create the dataframe agent with safety instructions (mirrors NLQ.ipynb)

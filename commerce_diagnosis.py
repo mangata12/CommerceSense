@@ -7,7 +7,7 @@ from copy import deepcopy
 import pandas as pd
 
 from commerce_metrics import (calculate_metrics, compare_periods, product_contribution,
-                              order_drilldown, daily_net_sales, prepare_metrics_frame)
+                              order_drilldown, daily_net_sales, prepare_metrics_frame, with_metrics_snapshot)
 from rag_knowledge import default_knowledge_base
 
 
@@ -72,6 +72,7 @@ class DiagnosticResult:
                 "rule_sources": self.rule_sources, "limitations": self.limitations}
 
 
+@with_metrics_snapshot
 def run_diagnosis(data, current_period, previous_period, quality=None, *, knowledge_base=None,
                   dataset_name="订单数据", top_n=10, evidence_top_n=3):
     if top_n < 1 or evidence_top_n < 1:
