@@ -5,16 +5,27 @@ from hashlib import sha256
 from commerce_data import infer_field_mapping, load_commerce_file, prepare_commerce_data
 
 
-RESULT_KEYS = {
+CHAT_KEYS = {
+    "commerce_messages", "commerce_tool_results", "commerce_agent_last_answer",
+    "commerce_chat_context", "commerce_retry_question", "commerce_chat_input",
+}
+
+RESULT_KEYS = CHAT_KEYS | {
     "commerce_agent_last_answer", "commerce_messages", "commerce_tool_results", "commerce_report",
     "commerce_current_period", "commerce_product_filter", "commerce_agent_question",
     "_nlq_last_answer", "_nlq_prefill", "_nlq_suggestions", "nlq_question",
     "_viz_prefill", "_viz_suggestions", "viz_request",
+    "commerce_advanced_result", "commerce_advanced_request",
 }
 
 
 def clear_analysis(state):
     for key in RESULT_KEYS:
+        state.pop(key, None)
+
+
+def clear_conversation(state):
+    for key in CHAT_KEYS:
         state.pop(key, None)
 
 

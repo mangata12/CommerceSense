@@ -48,11 +48,15 @@ class CommerceLifecycleTests(unittest.TestCase):
         apply_dataset_mapping(state, state["commerce_mapping"], "CNY")
         state["commerce_agent_last_answer"] = "stale"
         state["commerce_messages"] = ["old"]
+        state["commerce_chat_context"] = {"product_key": "id:01"}
+        state["commerce_retry_question"] = "old question"
         state["commerce_mapping_order_id"] = "订单编号"
         self.assertTrue(load_dataset(state, upload(self.csv.replace("001", "009"))))
         self.assertIsNone(state["commerce_standard_df"])
         self.assertIsNone(state["commerce_currency"])
         self.assertNotIn("commerce_messages", state)
+        self.assertNotIn("commerce_chat_context", state)
+        self.assertNotIn("commerce_retry_question", state)
         self.assertNotIn("commerce_mapping_order_id", state)
 
     def test_gb_csv_and_xlsx_string_ids(self):
