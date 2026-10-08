@@ -2,7 +2,11 @@
 
 import io
 import json
+import re
 import pandas as pd
+import matplotlib
+# Streamlit executes on a worker thread; Tk/Qt backends cannot render there.
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from langchain.prompts import PromptTemplate
@@ -396,7 +400,13 @@ that can help a data analyst gain deeper insights into this dataset.
 # ----------------------------
 # NLQ answering: use agent executor to execute pandas code (like NLQ.ipynb)
 # ----------------------------
-def answer_nlq_text(model, df: pd.DataFrame, question: str, *, model_identity=None) -> str:
+class AdvancedQueryError(RuntimeError):
+    def __init__(self, message, tool_calls):
+        super().__init__(message)
+        self.tool_calls = tool_calls
+
+
+def answer_nlq_text(model, df: pd.DataFrame, question: str, *, model_identity=None, tool_calls=None) -> str:
     identity_answer = configured_identity_answer(question, model_identity)
     if identity_answer:
         return identity_answer
@@ -411,8 +421,15 @@ You must **not** execute or suggest any commands that:
 
 If the user asks for something unsafe, politely refuse.
 When answering, provide specific numbers and results from the data, not approximations.
+Return a final concise answer after obtaining the required result; do not repeat a successful calculation.
+This tool returns text only. Do not generate plots; chart requests use the separate visualization tool.
+Canonical quantity and unit_price may contain Decimal objects; convert explicitly when a numeric operation requires it.
+Identifiers are strings; preserve leading zeros. Net sales includes negative-quantity reversals.
+Return only the requested aggregates or at most 20 evidence rows, never the entire dataframe.
 """ + "\n" + model_identity_instruction(model_identity)
 
+    from commerce_agent import ToolExecutionRecorder
+    recorder = ToolExecutionRecorder()
     try:
         # Create the dataframe agent with safety instructions (mirrors NLQ.ipynb)
         agent = create_pandas_dataframe_agent(
@@ -420,18 +437,28 @@ When answering, provide specific numbers and results from the data, not approxim
             df.copy(deep=True),
             verbose=False,  # Set to True if you want to see tool invocations
             allow_dangerous_code=True,  # Required for pandas agent
-            agent_type="openai-tools",  # Ensures reasoning with tool use
+            agent_type="tool-calling",
             prefix=system_prompt,
             max_iterations=4,
             max_execution_time=120,
         )
-        result = agent.invoke(question)
+        result = agent.invoke({"input": question}, config={"callbacks": [recorder]})
         # Agent returns a dict with 'input' and 'output' keys
         if isinstance(result, dict):
-            return result.get("output", str(result))
-        return str(result)
+            answer = str(result.get("output", str(result)))
+        else:
+            answer = str(result)
     except Exception as e:
-        return f"Error executing NLQ: {str(e)}"
+        raise AdvancedQueryError(f"自然语言查询失败：{e}", recorder.records) from e
+    finally:
+        for record in recorder.records:
+            if isinstance(record["result"], str) and re.match(r"^[A-Za-z_]\w*(?:Error|Exception):", record["result"]):
+                record["status"] = "error"
+        if tool_calls is not None:
+            tool_calls.extend(recorder.records)
+    if answer.startswith("Agent stopped due to"):
+        raise AdvancedQueryError("自然语言查询未完成：已达到最多 4 轮工具调用或运行时间限制。请查看工具执行记录；绘图需求会自动转到自由绘图。", recorder.records)
+    return answer
 
 
 # ----------------------------
@@ -449,6 +476,11 @@ Rules:
 - Do NOT read/write files. Do NOT show() the plot. Do NOT print.
 - Always create a figure and axis: `fig, ax = plt.subplots(figsize=(8,5))` and plot on `ax`.
 - Title and label axes when sensible.
+- Do not use an Agent, a Python REPL, or tool calls. Return executable plotting code directly.
+- quantity and unit_price may be Decimal objects. Convert explicitly for plotting; never group or convert identifier columns as numbers.
+- For net sales, include negative quantities. If aggregating money, calculate integer minor units per line first, sum them, then divide by 100 for display.
+- If the request lacks a grouping or metric, use the top 10 products by net sales when product fields exist, with the currency and chosen metric in the title.
+- Prefer canonical fields (product_id, product_name, quantity, unit_price, order_time); same-name products with different IDs remain separate.
 
 ### DataFrame Details:
 {details}
@@ -461,7 +493,10 @@ Output only raw code, no markdown.
         input_variables=["details", "viz_request"],
     )
     chain = prompt | model | StrOutputParser()
-    code = chain.invoke({"details": details, "viz_request": viz_request})
+    code = chain.invoke({"details": details, "viz_request": viz_request}).strip()
+    fenced = re.fullmatch(r"```(?:python|py)?\s*\n(.*?)\n?```", code, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        code = fenced.group(1).strip()
 
     # Remove any import statements to avoid blocked imports in restricted exec
     sanitized_lines = []
@@ -497,19 +532,24 @@ Output only raw code, no markdown.
         "zip": zip,
         "sorted": sorted,
     }
-    safe_globals = {"__builtins__": safe_builtins}
     # Provide a default fig/ax for code that references ax without creating it
     default_fig, default_ax = plt.subplots(figsize=(8, 5))
-    safe_locals = {"df": df.copy(deep=True), "pd": pd, "plt": plt, "sns": sns, "fig": default_fig, "ax": default_ax}
-    # Ensure a fresh figure context per run
-    plt.close("all")
+    namespace = {"__builtins__": safe_builtins, "df": df.copy(deep=True), "pd": pd, "plt": plt, "sns": sns, "fig": default_fig, "ax": default_ax}
     try:
-        exec(code, safe_globals, safe_locals)
-        # Try to get fig from locals (recommended), else fallback to current figure
-        fig = safe_locals.get("fig", plt.gcf())
+        exec(code, namespace, namespace)
+        # A text answer or an empty figure must not be reported as a chart.
+        fig = namespace.get("fig")
+        if fig is None or not hasattr(fig, "axes") or not any(axis.has_data() for axis in fig.axes):
+            raise ValueError("绘图代码没有生成包含数据的图表，请明确要比较的字段和指标后重试。")
         return fig, code, None
     except Exception as e:
         return None, code, str(e)
+    finally:
+        # Close only this call's figure managers; returned Figure remains renderable.
+        plt.close(default_fig)
+        generated = namespace.get("fig")
+        if isinstance(generated, plt.Figure) and generated is not default_fig:
+            plt.close(generated)
 
 
 # ----------------------------

@@ -14,6 +14,7 @@ from commerce_metrics import calculate_metrics, compare_periods, product_contrib
 from commerce_session import load_dataset, apply_dataset_mapping, clear_conversation, prepared_preview
 from commerce_view_cache import cached_view
 from model_identity import public_model_identity, configured_identity_answer
+from advanced_routing import resolve_advanced_mode
 from model_config import PROVIDERS, resolve_model_settings, create_chat_model, safe_error
 from report_ui import render_report
 
@@ -310,9 +311,12 @@ def render_advanced_tools(data, config):
             mode = st.selectbox("工具类型", ["自然语言查询", "自由绘图", "数据处理"], key="commerce_advanced_mode")
             request = st.text_area("描述需求", key="commerce_advanced_request")
             submitted = st.form_submit_button("执行高级工具", key="execute_advanced")
+        st.caption("自然语言查询返回文字；明确的画图需求会自动转到自由绘图。也可直接选择“自由绘图”。")
         if submitted and not request.strip():
             st.warning("请先输入需求。")
         elif submitted:
+            selected_mode = mode
+            mode = resolve_advanced_mode(mode, request)
             try:
                 identity_answer = configured_identity_answer(request, identity)
                 if identity_answer:
@@ -323,25 +327,38 @@ def render_advanced_tools(data, config):
                     from advanced_tools import answer_nlq_text, generate_and_render_chart, manipulate_dataframe_with_llm
                     with st.spinner("正在执行高级工具…"):
                         if mode == "自然语言查询":
-                            result = {"mode": mode, "answer": answer_nlq_text(model, data, request, model_identity=identity)}
+                            calls = []
+                            answer = answer_nlq_text(model, data, request, model_identity=identity, tool_calls=calls)
+                            result = {"mode": mode, "answer": answer, "tool_calls": calls}
                         elif mode == "自由绘图":
                             figure, code, error = generate_and_render_chart(model, data, request)
                             result = {"mode": mode, "figure": figure, "code": code, "error": error}
                         else:
                             frame, code, error = manipulate_dataframe_with_llm(model, data, request)
                             result = {"mode": mode, "frame": frame, "code": code, "error": error}
-                st.session_state["commerce_advanced_result"] = {**result, "model_identity": identity}
+                st.session_state["commerce_advanced_result"] = {**result, "requested_mode": selected_mode, "model_identity": identity}
             except Exception as exc:
-                st.session_state["commerce_advanced_result"] = {"mode": mode, "error": safe_error(exc, (config[2],)), "model_identity": identity}
+                st.session_state["commerce_advanced_result"] = {"mode": mode, "requested_mode": selected_mode, "error": safe_error(exc, (config[2],)),
+                    "tool_calls": getattr(exc, "tool_calls", []), "model_identity": identity}
         result = st.session_state.get("commerce_advanced_result")
         if result and result.get("model_identity") != identity:
             st.session_state.pop("commerce_advanced_result", None)
             result = None
         if result:
+            if result.get("requested_mode") and result["requested_mode"] != result["mode"]:
+                st.info(f"识别到绘图需求，本次使用：{result['mode']}。")
+            else:
+                st.caption("本次工具：" + result["mode"])
             if result.get("error"):
                 st.error(safe_error(result["error"], (config[2],)))
             if result.get("answer"):
                 st.markdown(result["answer"])
+            if result.get("tool_calls"):
+                with st.expander("高级查询工具执行记录", expanded=bool(result.get("error"))):
+                    for call in result["tool_calls"]:
+                        st.caption(f"{call['tool']} · {call['status']}")
+                        st.code(safe_error(str(call["input"]), (config[2],)), language="python")
+                        st.text(safe_error(str(call["result"]), (config[2],))[:4000])
             if result.get("code"):
                 st.code(result["code"], language="python")
             if result.get("figure") is not None:
